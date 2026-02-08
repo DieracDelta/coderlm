@@ -2,8 +2,8 @@
   "name": "coderlm",
   "description": "Tree-sitter code indexing plugin for Claude Code",
   "owner": {
-    "name": "jared",
-    "url": "https://github.com/jared"
+    "name": "Jared Stewart",
+    "url": "https://github.com/JaredStewart"
   },
   "plugins": [
     {

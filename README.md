@@ -46,7 +46,7 @@ The fastest way to get started. Requires Rust toolchain for building the server.
 
 ```bash
 # 1. Install the plugin (registers skill, hooks, and slash commands)
-claude plugin install github:jared/coderlm
+claude plugin install github:JaredStewart/coderlm
 
 # 2. Build the server
 cd ~/.claude/plugins/cache/coderlm/coderlm/latest/server
@@ -64,7 +64,7 @@ After installation, the `/coderlm` skill is available in every Claude Code sessi
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/jared/coderlm.git
+git clone https://github.com/JaredStewart/coderlm.git
 cd coderlm
 
 # 2. Build the server
