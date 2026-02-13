@@ -39,7 +39,22 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-STATE_DIR = Path(".claude/coderlm_state")
+def _state_dir() -> Path:
+    """Return per-instance state directory.
+
+    If CODERLM_INSTANCE is set (e.g. by session-init.sh), each Claude Code
+    instance gets its own subdirectory so concurrent sessions in the same
+    project don't clobber each other.  Falls back to the flat layout for
+    backward compat.
+    """
+    base = Path(".claude/coderlm_state")
+    inst = os.environ.get("CODERLM_INSTANCE")
+    if inst:
+        return base / "sessions" / inst
+    return base
+
+
+STATE_DIR = _state_dir()
 STATE_FILE = STATE_DIR / "session.json"
 
 
@@ -63,7 +78,7 @@ def _clear_state() -> None:
 
 def _base_url(state: dict) -> str:
     host = state.get("host", "127.0.0.1")
-    port = state.get("port", 3000)
+    port = state.get("port", int(os.environ.get("CODERLM_PORT", 3002)))
     return f"http://{host}:{port}/api/v1"
 
 
@@ -145,7 +160,7 @@ def _output(result: dict) -> None:
 def cmd_init(args: argparse.Namespace) -> None:
     cwd = os.path.abspath(args.cwd or os.getcwd())
     host = args.host or "127.0.0.1"
-    port = args.port or 3000
+    port = args.port or int(os.environ.get("CODERLM_PORT", 3002))
     base = f"http://{host}:{port}/api/v1"
 
     # Check server health first
@@ -153,6 +168,21 @@ def cmd_init(args: argparse.Namespace) -> None:
         health = _request("GET", f"{base}/health")
     except SystemExit:
         return
+
+    # Reuse existing session if it's still valid on the server
+    existing = _load_state()
+    if existing.get("session_id") and existing.get("project") == cwd:
+        sid = existing["session_id"]
+        try:
+            _request("GET", f"{base}/sessions/{sid}")
+            print(f"Session reused: {sid}")
+            print(f"Project: {cwd}")
+            print(f"Server: {health.get('status', 'ok')} "
+                  f"({health.get('projects', 0)} projects, "
+                  f"{health.get('active_sessions', 0)} sessions)")
+            return
+        except SystemExit:
+            pass  # session expired or invalid, create a new one
 
     # Create session
     result = _request("POST", f"{base}/sessions", data={"cwd": cwd})
@@ -177,7 +207,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     if not state:
         # No session — just check server health
         host = args.host or "127.0.0.1"
-        port = args.port or 3000
+        port = args.port or int(os.environ.get("CODERLM_PORT", 3002))
         base = f"http://{host}:{port}/api/v1"
         result = _request("GET", f"{base}/health")
         _output(result)
@@ -378,7 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init", help="Create a session for the current project")
     p_init.add_argument("--cwd", help="Project directory (default: $PWD)")
     p_init.add_argument("--host", default=None, help="Server host (default: 127.0.0.1)")
-    p_init.add_argument("--port", type=int, default=None, help="Server port (default: 3000)")
+    p_init.add_argument("--port", type=int, default=None, help="Server port (default: $CODERLM_PORT or 3002)")
     p_init.set_defaults(func=cmd_init)
 
     # status
