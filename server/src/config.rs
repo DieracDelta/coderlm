@@ -30,6 +30,7 @@ pub const DEFAULT_IGNORE_DIRS: &[&str] = &[
     "htmlcov",
     ".terraform",
     ".serverless",
+    ".lake",
 ];
 
 /// File extensions that are binary or otherwise useless for code reading.
@@ -38,7 +39,7 @@ pub const DEFAULT_IGNORE_EXTENSIONS: &[&str] = &[
     "jar", "war", "ear", "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "png", "jpg", "jpeg",
     "gif", "bmp", "ico", "svg", "webp", "mp3", "mp4", "avi", "mov", "wmv", "flv", "woff",
     "woff2", "ttf", "eot", "otf", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "db",
-    "sqlite", "sqlite3", "lock", "map",
+    "sqlite", "sqlite3", "lock", "map", "olean",
 ];
 
 /// Maximum file size (in bytes) to index by default. Files larger than this

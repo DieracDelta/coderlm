@@ -10,6 +10,7 @@ pub enum Language {
     TypeScript,
     JavaScript,
     Go,
+    Lean,
     Java,
     C,
     Cpp,
@@ -33,6 +34,7 @@ impl Language {
             "ts" | "tsx" => Language::TypeScript,
             "js" | "jsx" | "mjs" | "cjs" => Language::JavaScript,
             "go" => Language::Go,
+            "lean" => Language::Lean,
             "java" => Language::Java,
             "c" | "h" => Language::C,
             "cpp" | "cc" | "cxx" | "hpp" | "hxx" | "hh" => Language::Cpp,
@@ -60,7 +62,7 @@ impl Language {
     pub fn has_tree_sitter_support(&self) -> bool {
         matches!(
             self,
-            Language::Rust | Language::Python | Language::TypeScript | Language::JavaScript | Language::Go
+            Language::Rust | Language::Python | Language::TypeScript | Language::JavaScript | Language::Go | Language::Lean
         )
     }
 }

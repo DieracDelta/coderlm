@@ -249,6 +249,17 @@ fn is_definition_line(line: &str, name: &str, language: Language) -> bool {
                 || line.contains(&format!("{} =", name))
         }
         Language::Go => line.contains(&format!("func {}", name)),
+        Language::Lean => {
+            line.contains(&format!("def {}", name))
+                || line.contains(&format!("theorem {}", name))
+                || line.contains(&format!("abbrev {}", name))
+                || line.contains(&format!("structure {}", name))
+                || line.contains(&format!("class {}", name))
+                || line.contains(&format!("inductive {}", name))
+                || line.contains(&format!("constant {}", name))
+                || line.contains(&format!("axiom {}", name))
+                || line.contains(&format!("instance {}", name))
+        }
         _ => false,
     }
 }
@@ -327,6 +338,9 @@ fn is_test_symbol(sym: &Symbol) -> bool {
         }
         Language::Go => {
             sym.name.starts_with("Test") || sym.file.ends_with("_test.go")
+        }
+        Language::Lean => {
+            sym.file.contains("Test") || sym.file.contains("test")
         }
         _ => false,
     }
@@ -473,6 +487,15 @@ fn list_variables_regex(
             }
             let var_re = regex::Regex::new(r"var\s+(\w+)").unwrap();
             for cap in var_re.captures_iter(body) {
+                variables.push(VariableInfo {
+                    name: cap[1].to_string(),
+                    function: function_name.to_string(),
+                });
+            }
+        }
+        Language::Lean => {
+            let let_re = regex::Regex::new(r"let\s+(\w+)\s*.*:=").unwrap();
+            for cap in let_re.captures_iter(body) {
                 variables.push(VariableInfo {
                     name: cap[1].to_string(),
                     function: function_name.to_string(),
