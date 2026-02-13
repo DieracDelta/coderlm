@@ -10,22 +10,26 @@ You have access to a tree-sitter-backed index server that knows the structure of
 ## Setup
 
 ```bash
-# Initialize a session (do this once per project)
-python3 .claude/coderlm_state/coderlm_cli.py init
+CLI=".claude/coderlm_state/coderlm_cli.py"
+python3 $CLI init
 ```
 
 ## Tools
 
+**Use ONLY the exact flags shown. There is no `--path` flag, no `--glob` flag.**
+
 ```bash
 CLI=".claude/coderlm_state/coderlm_cli.py"
 
-python3 $CLI structure                          # File tree + module overview
-python3 $CLI search "symbol_name"               # Find symbols by name
-python3 $CLI impl function_name --file path     # Get exact implementation
-python3 $CLI callers function_name --file path  # Who calls this function?
-python3 $CLI tests --file path                  # Find tests covering this file
-python3 $CLI grep "pattern"                     # Scope-aware pattern search
-python3 $CLI peek path --start N --end N        # Read a specific line range
+python3 $CLI structure [--depth N]                                      # File tree (always full tree, no path filter)
+python3 $CLI search QUERY [--limit N]                                   # Find symbols by name
+python3 $CLI symbols [--file FILE] [--kind KIND] [--limit N]            # List symbols, optionally filter by file
+python3 $CLI impl SYMBOL --file FILE                                    # Get exact implementation (--file required)
+python3 $CLI callers SYMBOL --file FILE [--limit N]                     # Who calls this? (--file required)
+python3 $CLI tests SYMBOL --file FILE [--limit N]                       # Tests for this symbol (--file required)
+python3 $CLI variables FUNCTION --file FILE                             # Local variables (--file required)
+python3 $CLI peek FILE [--start N] [--end N]                            # Read a specific line range
+python3 $CLI grep PATTERN [--max-matches N] [--context-lines N] [--scope all|code]  # Regex search (all files, no file filter)
 ```
 
 ## How to Explore

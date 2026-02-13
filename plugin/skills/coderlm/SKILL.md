@@ -47,61 +47,62 @@ If the server is not running, all CLI commands will fail with a connection error
 
 ## CLI Reference
 
-All commands go through the wrapper script:
+The CLI is available via a symlink created at session start:
 
 ```bash
-python3 skills/coderlm/scripts/coderlm_cli.py <command> [args]
+CLI=".claude/coderlm_state/coderlm_cli.py"
 ```
 
-### Setup
+This symlink is set up automatically by the SessionStart hook. If it doesn't exist, the coderlm plugin may not be installed or the session hasn't started properly.
+
+**IMPORTANT — use ONLY the exact flags listed below. There is no `--path` flag, no `--glob` flag, and no `--file` flag on commands that don't list it. Using unlisted flags will cause an error.**
+
+### Complete command reference
 
 ```bash
-cli init                                  # Create session, index the project
-cli structure --depth 2                   # File tree with language breakdown
-```
+# Session management
+python3 $CLI init [--cwd PATH] [--port N]
+python3 $CLI status
+python3 $CLI cleanup
 
-### Finding Code
+# Project overview (no file/path filter — always shows full tree)
+python3 $CLI structure [--depth N]
 
-```bash
-cli search "symbol_name" --limit 20       # Find symbols by name (index lookup)
-cli symbols --kind function --file path   # List all functions in a file
-cli grep "pattern" --max-matches 20       # Scope-aware pattern search
-```
+# Find symbols by name (searches the whole index, not filterable by file)
+python3 $CLI search QUERY [--limit N]
 
-### Retrieving Exact Code
+# List symbols in a specific file or by kind
+python3 $CLI symbols [--file FILE] [--kind KIND] [--limit N]
 
-```bash
-cli impl function_name --file path        # Full function body (tree-sitter extracted)
-cli peek path --start N --end M           # Exact line range
-cli variables function_name --file path   # Local variables inside a function
+# Get the full source of a specific symbol (--file is REQUIRED)
+python3 $CLI impl SYMBOL --file FILE
+
+# Find all call sites for a symbol (--file is REQUIRED)
+python3 $CLI callers SYMBOL --file FILE [--limit N]
+
+# Find tests referencing a symbol (--file is REQUIRED)
+python3 $CLI tests SYMBOL --file FILE [--limit N]
+
+# List local variables inside a function (--file is REQUIRED)
+python3 $CLI variables FUNCTION --file FILE
+
+# Read a specific line range from a file
+python3 $CLI peek FILE [--start N] [--end N]
+
+# Regex search across ALL indexed files (no file/path/glob filter)
+python3 $CLI grep PATTERN [--max-matches N] [--context-lines N] [--scope all|code]
+
+# Annotations
+python3 $CLI define-file FILE "description"
+python3 $CLI redefine-file FILE "description"
+python3 $CLI define-symbol SYMBOL --file FILE "description"
+python3 $CLI redefine-symbol SYMBOL --file FILE "description"
+python3 $CLI mark FILE TYPE
+python3 $CLI save-annotations
+python3 $CLI load-annotations
 ```
 
 **Prefer `impl` and `peek` over the Read tool.** They return exactly the code you need — a single function from a 1000-line file, a specific line range — without loading irrelevant code into context. Fall back to Read only when you need an entire small file.
-
-### Tracing Connections
-
-```bash
-cli callers function_name --file path     # Every call site: file, line, calling code
-cli tests function_name --file path       # Tests referencing this symbol
-```
-
-These search the entire indexed codebase, not just files you've already seen.
-
-### Annotating
-
-```bash
-cli define-file src/server/mod.rs "HTTP routing and handler dispatch"
-cli define-symbol handle_request --file src/server/mod.rs "Routes requests by method+path"
-cli mark tests/integration.rs test
-```
-
-Annotations persist across queries within a session — build shared understanding as you go.
-
-### Cleanup
-
-```bash
-cli cleanup                               # End session
-```
 
 ## Inputs
 

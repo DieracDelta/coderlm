@@ -1,5 +1,5 @@
 #!/bin/bash
-# Check if coderlm-server is running and auto-create session.
+# Set up coderlm CLI symlink and optionally auto-create session.
 # Always exits 0 to never block session start.
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -7,15 +7,16 @@ CLI="$PLUGIN_ROOT/skills/coderlm/scripts/coderlm_cli.py"
 BASE_STATE_DIR=".claude/coderlm_state"
 CODERLM_PORT="${CODERLM_PORT:-3002}"
 
-# Check server health
+# Always create the symlink so the skill can find the CLI,
+# even if the server isn't running yet.
+mkdir -p "$BASE_STATE_DIR"
+ln -sf "$CLI" "$BASE_STATE_DIR/coderlm_cli.py"
+
+# Check server health — if not running, stop here (symlink is set up)
 if ! curl -s --max-time 2 "http://127.0.0.1:${CODERLM_PORT}/api/v1/health" > /dev/null 2>&1; then
     echo "[coderlm] Server not running on port ${CODERLM_PORT}" >&2
     exit 0
 fi
-
-# Create symlink so the skill can find the CLI
-mkdir -p "$BASE_STATE_DIR"
-ln -sf "$CLI" "$BASE_STATE_DIR/coderlm_cli.py"
 
 # Without CODERLM_INSTANCE, use the flat layout (backward compat).
 # The CLI's init already reuses valid sessions, so concurrent inits

@@ -5,7 +5,7 @@ The CLI wrapper (`coderlm_cli.py`) handles headers and session management automa
 
 ## CLI Command Reference
 
-All commands below assume the CLI is at `skills/coderlm/scripts/coderlm_cli.py`.
+All commands below assume the CLI is at `.claude/coderlm_state/coderlm_cli.py`.
 Abbreviated as `cli` below.
 
 ### Session Management
