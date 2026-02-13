@@ -14,7 +14,12 @@ pub const SYMBOLS_QUERY: &str = r#"
   name: (identifier) @function.name) @function.def
 
 (structure
+  "structure"
   name: (identifier) @struct.name) @struct.def
+
+(structure
+  "class"
+  name: (identifier) @class.name) @class.def
 
 (class_inductive
   name: (identifier) @class.name) @class.def
