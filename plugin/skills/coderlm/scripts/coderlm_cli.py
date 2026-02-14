@@ -585,11 +585,10 @@ def cmd_subcall_batch(args: argparse.Namespace) -> None:
             "end": chunk["line_end"],
         })
 
-        # Get buffer content for the subcall
+        # Get full buffer content for the subcall
         peek_resp = _get(
             state,
             f"/buffers/{urllib.parse.quote(buf_name, safe='')}/peek",
-            {"start": 0, "end": chunk["byte_end"] - chunk["byte_start"]},
         )
         content = peek_resp.get("content", "")
 

@@ -265,7 +265,7 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
         raise RuntimeError("'claude' CLI not found on PATH. Install Claude Code to use llm_query().")
 
     # Build the agent file path (relative to plugin root)
-    agent_file = Path(__file__).parent.parent.parent.parent / "agents" / "coderlm-subcall.md"
+    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / "coderlm-subcall.md"
     if not agent_file.exists():
         # Try project-level .claude/agents/
         agent_file = Path(".claude/agents/coderlm-subcall.md")
