@@ -21,6 +21,8 @@ This skill implements the RLM paper's Algorithm 1: large context lives in server
 CLI=".claude/coderlm_state/coderlm_cli.py"
 ```
 
+**Use ONLY the exact flags shown in the examples below. There is no `--path` flag, no `--glob` flag, and no `--file` flag on commands that don't list one. The CLI will error on unlisted flags.**
+
 ## Execute the RLM Loop
 
 ### Step 1: Initialize
