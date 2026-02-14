@@ -9,39 +9,19 @@ allowed-tools:
 
 # CodeRLM Deep Analysis (RLM Loop)
 
-This skill implements Algorithm 1 from the RLM paper: an LLM works inside a REPL environment where large context lives externally (in server-side buffers), and chunk-level reasoning is delegated to a sub-LM.
+**When this skill is invoked, immediately begin executing the workflow below. Do not summarize these instructions — start working.**
 
-## When to Use This
+Parse `$ARGUMENTS` for: `query=<question>` (required), `target=<file_or_module>` (optional), `max_chunk_bytes=<N>` (optional, default 5000). If no query is provided, ask the user what they want to analyze.
 
-- Questions that span many files or modules
-- "How does X work end-to-end?" across multiple layers
-- Security audits of a subsystem
-- Understanding complex data flows
-- Any task where a single `impl` or `callers` call isn't enough
-
-For simple lookups (find a function, read an implementation, trace one caller chain), use `/coderlm` instead.
-
-## Prerequisites
-
-1. `coderlm-server` must be running
-2. The `coderlm-subcall` agent must be available (plugin/agents/coderlm-subcall.md)
-3. `claude` CLI must be on PATH (for subagent dispatch)
+This skill implements the RLM paper's Algorithm 1: large context lives in server-side buffers, chunk-level reasoning is delegated to a sub-LM (Haiku), and you synthesize findings. Use `/coderlm` for quick single-symbol lookups; this skill is for deep multi-file analysis.
 
 ## CLI Setup
 
 ```bash
 CLI=".claude/coderlm_state/coderlm_cli.py"
-REPL="python3 $(dirname $CLI)/../skills/coderlm/scripts/coderlm_repl.py"
 ```
 
-## Inputs
-
-This skill reads `$ARGUMENTS`. Accepted patterns:
-- `query=<question>` (required): the deep analysis question
-- `target=<file_or_module>` (optional): specific file or directory to focus on
-- `max_chunk_bytes=<N>` (optional): chunk size, default 5000
-
-## The RLM Loop (Algorithm 1)
+## Execute the RLM Loop
 
 ### Step 1: Initialize
 
