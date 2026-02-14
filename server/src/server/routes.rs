@@ -8,9 +8,9 @@ use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::ops::{annotations, content, history, structure, symbol_ops};
+use crate::ops::{annotations, content, history, repl, structure, symbol_ops};
 use crate::server::errors::AppError;
-use crate::server::session::Session;
+use crate::server::session::{ReplState, Session};
 use crate::server::state::{AppState, Project};
 use crate::symbols::symbol::SymbolKind;
 
@@ -39,6 +39,17 @@ fn require_project(state: &AppState, headers: &HeaderMap) -> Result<Arc<Project>
         session.last_active = chrono::Utc::now();
     }
     Ok(project)
+}
+
+/// Get the REPL state for the current session.
+fn require_repl(state: &AppState, headers: &HeaderMap) -> Result<Arc<ReplState>, AppError> {
+    let sid = require_session(headers)?;
+    let session = state
+        .inner
+        .sessions
+        .get(&sid)
+        .ok_or_else(|| AppError::NotFound(format!("Session '{}' not found", sid)))?;
+    Ok(session.repl_state.clone())
 }
 
 fn record_history(state: &AppState, session_id: Option<&str>, method: &str, path: &str, preview: &str) {
@@ -86,6 +97,24 @@ pub fn build_routes(state: AppState) -> Router {
         // Annotations
         .route("/api/v1/annotations/save", post(save_annotations))
         .route("/api/v1/annotations/load", post(load_annotations))
+        // Buffers
+        .route("/api/v1/buffers", get(list_buffers).post(create_buffer))
+        .route("/api/v1/buffers/from-file", post(buffer_from_file))
+        .route("/api/v1/buffers/from-symbol", post(buffer_from_symbol))
+        .route(
+            "/api/v1/buffers/{name}",
+            get(get_buffer_info).delete(delete_buffer),
+        )
+        .route("/api/v1/buffers/{name}/peek", get(peek_buffer))
+        // Variables
+        .route("/api/v1/vars", get(list_vars).post(set_var))
+        .route("/api/v1/vars/final", get(check_final))
+        .route(
+            "/api/v1/vars/{name}",
+            get(get_var).delete(delete_var),
+        )
+        // Semantic chunks
+        .route("/api/v1/semantic_chunks", get(semantic_chunks))
         .with_state(state)
 }
 
@@ -672,4 +701,268 @@ async fn load_annotations(
     });
     record_history(&state, session_id(&headers).as_deref(), "POST", "/annotations/load", "loaded");
     Ok(Json(json!({ "ok": true, "loaded": summary })))
+}
+
+// ---------------------------------------------------------------------------
+// Buffers
+// ---------------------------------------------------------------------------
+
+async fn list_buffers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let buffers = repl::buffer_list(&repl);
+    let count = buffers.len();
+    record_history(&state, session_id(&headers).as_deref(), "GET", "/buffers", &format!("{} buffers", count));
+    Ok(Json(json!({ "buffers": buffers, "count": count })))
+}
+
+#[derive(Deserialize)]
+struct CreateBufferBody {
+    name: String,
+    content: String,
+    #[serde(default)]
+    description: String,
+}
+
+async fn create_buffer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateBufferBody>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let info = repl::buffer_create(&repl, &body.name, body.content, &body.description);
+    record_history(&state, session_id(&headers).as_deref(), "POST", "/buffers", &body.name);
+    Ok(Json(serde_json::to_value(info).unwrap()))
+}
+
+#[derive(Deserialize)]
+struct BufferFromFileBody {
+    name: String,
+    file: String,
+    #[serde(default)]
+    start: usize,
+    #[serde(default = "default_end_line")]
+    end: usize,
+}
+
+fn default_end_line() -> usize {
+    100
+}
+
+async fn buffer_from_file(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BufferFromFileBody>,
+) -> Result<Json<Value>, AppError> {
+    let project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let info = repl::buffer_from_file(
+        &repl,
+        &project.root,
+        &project.file_tree,
+        &body.name,
+        &body.file,
+        body.start,
+        body.end,
+    )
+    .map_err(AppError::NotFound)?;
+    record_history(&state, session_id(&headers).as_deref(), "POST", "/buffers/from-file", &body.name);
+    Ok(Json(serde_json::to_value(info).unwrap()))
+}
+
+#[derive(Deserialize)]
+struct BufferFromSymbolBody {
+    name: String,
+    symbol: String,
+    file: String,
+}
+
+async fn buffer_from_symbol(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BufferFromSymbolBody>,
+) -> Result<Json<Value>, AppError> {
+    let project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let info = repl::buffer_from_symbol(
+        &repl,
+        &project.root,
+        &project.symbol_table,
+        &body.name,
+        &body.symbol,
+        &body.file,
+    )
+    .map_err(AppError::NotFound)?;
+    record_history(&state, session_id(&headers).as_deref(), "POST", "/buffers/from-symbol", &body.name);
+    Ok(Json(serde_json::to_value(info).unwrap()))
+}
+
+#[derive(Deserialize)]
+struct BufferPath {
+    name: String,
+}
+
+async fn get_buffer_info(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(params): axum::extract::Path<BufferPath>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let info = repl::buffer_info(&repl, &params.name).map_err(AppError::NotFound)?;
+    Ok(Json(serde_json::to_value(info).unwrap()))
+}
+
+#[derive(Deserialize)]
+struct BufferPeekQuery {
+    #[serde(default)]
+    start: usize,
+    #[serde(default = "default_peek_end")]
+    end: usize,
+}
+
+fn default_peek_end() -> usize {
+    500
+}
+
+async fn peek_buffer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(params): axum::extract::Path<BufferPath>,
+    Query(query): Query<BufferPeekQuery>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let content = repl::buffer_peek(&repl, &params.name, query.start, query.end)
+        .map_err(AppError::NotFound)?;
+    Ok(Json(json!({
+        "buffer": params.name,
+        "start": query.start,
+        "end": query.end,
+        "content": content,
+    })))
+}
+
+async fn delete_buffer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(params): axum::extract::Path<BufferPath>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    repl::buffer_delete(&repl, &params.name).map_err(AppError::NotFound)?;
+    record_history(&state, session_id(&headers).as_deref(), "DELETE", "/buffers", &params.name);
+    Ok(Json(json!({ "deleted": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Variables
+// ---------------------------------------------------------------------------
+
+async fn list_vars(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let vars = repl::var_list(&repl);
+    let entries: Vec<Value> = vars
+        .iter()
+        .map(|(name, value)| json!({ "name": name, "value": value }))
+        .collect();
+    let count = entries.len();
+    Ok(Json(json!({ "variables": entries, "count": count })))
+}
+
+#[derive(Deserialize)]
+struct SetVarBody {
+    name: String,
+    value: Value,
+}
+
+async fn set_var(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SetVarBody>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    repl::var_set(&repl, &body.name, body.value);
+    record_history(&state, session_id(&headers).as_deref(), "POST", "/vars", &body.name);
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct VarPath {
+    name: String,
+}
+
+async fn get_var(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(params): axum::extract::Path<VarPath>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let value = repl::var_get(&repl, &params.name).map_err(AppError::NotFound)?;
+    Ok(Json(json!({ "name": params.name, "value": value })))
+}
+
+async fn delete_var(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::Path(params): axum::extract::Path<VarPath>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    repl::var_delete(&repl, &params.name).map_err(AppError::NotFound)?;
+    record_history(&state, session_id(&headers).as_deref(), "DELETE", "/vars", &params.name);
+    Ok(Json(json!({ "deleted": true })))
+}
+
+async fn check_final(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    match repl::check_final(&repl) {
+        Some(value) => Ok(Json(json!({ "is_set": true, "value": value }))),
+        None => Ok(Json(json!({ "is_set": false }))),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Semantic chunks
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct SemanticChunkQuery {
+    file: String,
+    max_chunk_bytes: Option<usize>,
+}
+
+async fn semantic_chunks(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<SemanticChunkQuery>,
+) -> Result<Json<Value>, AppError> {
+    let project = require_project(&state, &headers)?;
+    let max_bytes = params.max_chunk_bytes.unwrap_or(5000);
+    let chunks = repl::semantic_chunks(
+        &project.root,
+        &project.file_tree,
+        &project.symbol_table,
+        &params.file,
+        max_bytes,
+    )
+    .map_err(AppError::NotFound)?;
+    let count = chunks.len();
+    let preview = format!("{} chunks for {}", count, params.file);
+    record_history(&state, session_id(&headers).as_deref(), "GET", "/semantic_chunks", &preview);
+    Ok(Json(json!({ "file": params.file, "chunks": chunks, "count": count })))
 }

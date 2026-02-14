@@ -25,6 +25,20 @@ Usage:
   python3 coderlm_cli.py load-annotations
   python3 coderlm_cli.py history [--limit N]
   python3 coderlm_cli.py status
+  python3 coderlm_cli.py buffer-list
+  python3 coderlm_cli.py buffer-create NAME "content" [--description "..."]
+  python3 coderlm_cli.py buffer-from-file NAME FILE [--start N] [--end N]
+  python3 coderlm_cli.py buffer-from-symbol NAME SYMBOL --file FILE
+  python3 coderlm_cli.py buffer-info NAME
+  python3 coderlm_cli.py buffer-peek NAME [--start N] [--end N]
+  python3 coderlm_cli.py buffer-delete NAME
+  python3 coderlm_cli.py var-list
+  python3 coderlm_cli.py var-set NAME 'json_value'
+  python3 coderlm_cli.py var-get NAME
+  python3 coderlm_cli.py var-delete NAME
+  python3 coderlm_cli.py check-final
+  python3 coderlm_cli.py semantic-chunks FILE [--max-chunk-bytes 5000]
+  python3 coderlm_cli.py repl --code "print(search('auth'))"
   python3 coderlm_cli.py cleanup
 """
 
@@ -148,6 +162,12 @@ def _post(state: dict, path: str, data: dict) -> dict:
     base = _base_url(state)
     url = f"{base}{path}"
     return _request("POST", url, data=data, headers={"X-Session-Id": _session_id(state)})
+
+
+def _delete_req(state: dict, path: str) -> dict:
+    base = _base_url(state)
+    url = f"{base}{path}"
+    return _request("DELETE", url, headers={"X-Session-Id": _session_id(state)})
 
 
 def _output(result: dict) -> None:
@@ -380,6 +400,123 @@ def cmd_load_annotations(args: argparse.Namespace) -> None:
     _output(_post(state, "/annotations/load", {}))
 
 
+# ── Buffer commands ────────────────────────────────────────────────────
+
+
+def cmd_buffer_list(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_get(state, "/buffers"))
+
+
+def cmd_buffer_create(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_post(state, "/buffers", {
+        "name": args.name,
+        "content": args.content,
+        "description": args.description or "",
+    }))
+
+
+def cmd_buffer_from_file(args: argparse.Namespace) -> None:
+    state = _load_state()
+    data: dict = {"name": args.name, "file": args.file}
+    if args.start is not None:
+        data["start"] = args.start
+    if args.end is not None:
+        data["end"] = args.end
+    _output(_post(state, "/buffers/from-file", data))
+
+
+def cmd_buffer_from_symbol(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_post(state, "/buffers/from-symbol", {
+        "name": args.name,
+        "symbol": args.symbol,
+        "file": args.file,
+    }))
+
+
+def cmd_buffer_info(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_get(state, f"/buffers/{urllib.parse.quote(args.name, safe='')}"))
+
+
+def cmd_buffer_peek(args: argparse.Namespace) -> None:
+    state = _load_state()
+    params = {}
+    if args.start is not None:
+        params["start"] = args.start
+    if args.end is not None:
+        params["end"] = args.end
+    _output(_get(state, f"/buffers/{urllib.parse.quote(args.name, safe='')}/peek", params))
+
+
+def cmd_buffer_delete(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_delete_req(state, f"/buffers/{urllib.parse.quote(args.name, safe='')}"))
+
+
+# ── Variable commands ─────────────────────────────────────────────────
+
+
+def cmd_var_list(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_get(state, "/vars"))
+
+
+def cmd_var_set(args: argparse.Namespace) -> None:
+    state = _load_state()
+    try:
+        value = json.loads(args.value)
+    except json.JSONDecodeError:
+        # Treat as string if not valid JSON
+        value = args.value
+    _output(_post(state, "/vars", {"name": args.name, "value": value}))
+
+
+def cmd_var_get(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_get(state, f"/vars/{urllib.parse.quote(args.name, safe='')}"))
+
+
+def cmd_var_delete(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_delete_req(state, f"/vars/{urllib.parse.quote(args.name, safe='')}"))
+
+
+def cmd_check_final(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_get(state, "/vars/final"))
+
+
+# ── Semantic chunks ───────────────────────────────────────────────────
+
+
+def cmd_semantic_chunks(args: argparse.Namespace) -> None:
+    state = _load_state()
+    params = {"file": args.file}
+    if args.max_chunk_bytes is not None:
+        params["max_chunk_bytes"] = args.max_chunk_bytes
+    _output(_get(state, "/semantic_chunks", params))
+
+
+# ── REPL ──────────────────────────────────────────────────────────────
+
+
+def cmd_repl(args: argparse.Namespace) -> None:
+    """Execute code in the REPL environment by spawning coderlm_repl.py."""
+    import subprocess
+    repl_script = Path(__file__).parent / "coderlm_repl.py"
+    cmd = [sys.executable, str(repl_script), "exec"]
+    if args.code:
+        cmd.extend(["--code", args.code])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    sys.stdout.write(result.stdout)
+    if result.stderr:
+        sys.stderr.write(result.stderr)
+    sys.exit(result.returncode)
+
+
 def cmd_cleanup(args: argparse.Namespace) -> None:
     state = _load_state()
     if not state.get("session_id"):
@@ -529,6 +666,84 @@ def build_parser() -> argparse.ArgumentParser:
     # load-annotations
     p_load = sub.add_parser("load-annotations", help="Load annotations from disk")
     p_load.set_defaults(func=cmd_load_annotations)
+
+    # buffer-list
+    p_bl = sub.add_parser("buffer-list", help="List all buffers (metadata only)")
+    p_bl.set_defaults(func=cmd_buffer_list)
+
+    # buffer-create
+    p_bc = sub.add_parser("buffer-create", help="Create a buffer from content")
+    p_bc.add_argument("name", help="Buffer name")
+    p_bc.add_argument("content", help="Buffer content")
+    p_bc.add_argument("--description", default=None, help="Buffer description")
+    p_bc.set_defaults(func=cmd_buffer_create)
+
+    # buffer-from-file
+    p_bff = sub.add_parser("buffer-from-file", help="Load file content into a buffer")
+    p_bff.add_argument("name", help="Buffer name")
+    p_bff.add_argument("file", help="File path")
+    p_bff.add_argument("--start", type=int, default=None, help="Start line (0-indexed)")
+    p_bff.add_argument("--end", type=int, default=None, help="End line (exclusive)")
+    p_bff.set_defaults(func=cmd_buffer_from_file)
+
+    # buffer-from-symbol
+    p_bfs = sub.add_parser("buffer-from-symbol", help="Load symbol source into a buffer")
+    p_bfs.add_argument("name", help="Buffer name")
+    p_bfs.add_argument("symbol", help="Symbol name")
+    p_bfs.add_argument("--file", required=True, help="File containing the symbol")
+    p_bfs.set_defaults(func=cmd_buffer_from_symbol)
+
+    # buffer-info
+    p_bi = sub.add_parser("buffer-info", help="Get buffer metadata")
+    p_bi.add_argument("name", help="Buffer name")
+    p_bi.set_defaults(func=cmd_buffer_info)
+
+    # buffer-peek
+    p_bp = sub.add_parser("buffer-peek", help="Read a slice of a buffer")
+    p_bp.add_argument("name", help="Buffer name")
+    p_bp.add_argument("--start", type=int, default=None, help="Start byte offset")
+    p_bp.add_argument("--end", type=int, default=None, help="End byte offset")
+    p_bp.set_defaults(func=cmd_buffer_peek)
+
+    # buffer-delete
+    p_bd = sub.add_parser("buffer-delete", help="Delete a buffer")
+    p_bd.add_argument("name", help="Buffer name")
+    p_bd.set_defaults(func=cmd_buffer_delete)
+
+    # var-list
+    p_vl = sub.add_parser("var-list", help="List all variables")
+    p_vl.set_defaults(func=cmd_var_list)
+
+    # var-set
+    p_vs = sub.add_parser("var-set", help="Set a variable")
+    p_vs.add_argument("name", help="Variable name")
+    p_vs.add_argument("value", help="JSON value (or plain string)")
+    p_vs.set_defaults(func=cmd_var_set)
+
+    # var-get
+    p_vg = sub.add_parser("var-get", help="Get a variable value")
+    p_vg.add_argument("name", help="Variable name")
+    p_vg.set_defaults(func=cmd_var_get)
+
+    # var-delete
+    p_vd = sub.add_parser("var-delete", help="Delete a variable")
+    p_vd.add_argument("name", help="Variable name")
+    p_vd.set_defaults(func=cmd_var_delete)
+
+    # check-final
+    p_cf = sub.add_parser("check-final", help="Check if Final variable is set")
+    p_cf.set_defaults(func=cmd_check_final)
+
+    # semantic-chunks
+    p_sc = sub.add_parser("semantic-chunks", help="Get symbol-aligned chunks for a file")
+    p_sc.add_argument("file", help="File path")
+    p_sc.add_argument("--max-chunk-bytes", type=int, default=None, help="Max chunk size in bytes")
+    p_sc.set_defaults(func=cmd_semantic_chunks)
+
+    # repl
+    p_repl = sub.add_parser("repl", help="Execute code in the RLM REPL environment")
+    p_repl.add_argument("--code", help="Code to execute (reads stdin if omitted)")
+    p_repl.set_defaults(func=cmd_repl)
 
     # cleanup
     p_clean = sub.add_parser("cleanup", help="Delete the current session")
