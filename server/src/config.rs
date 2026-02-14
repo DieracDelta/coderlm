@@ -45,7 +45,7 @@ pub const DEFAULT_IGNORE_EXTENSIONS: &[&str] = &[
 
 /// Maximum file size (in bytes) to index by default. Files larger than this
 /// are still listed in the tree but are not parsed for symbols.
-pub const DEFAULT_MAX_FILE_SIZE: u64 = 1_000_000; // 1 MB
+pub const DEFAULT_MAX_FILE_SIZE: u64 = 20_000_000_000; // 20 GB
 
 pub fn should_ignore_dir(name: &str) -> bool {
     DEFAULT_IGNORE_DIRS.iter().any(|&d| d == name)

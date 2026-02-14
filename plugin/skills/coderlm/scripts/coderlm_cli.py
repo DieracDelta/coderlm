@@ -533,7 +533,7 @@ def cmd_semantic_chunks(args: argparse.Namespace) -> None:
 def cmd_repl(args: argparse.Namespace) -> None:
     """Execute code in the REPL environment by spawning coderlm_repl.py."""
     import subprocess
-    repl_script = Path(__file__).parent / "coderlm_repl.py"
+    repl_script = Path(__file__).resolve().parent / "coderlm_repl.py"
     cmd = [sys.executable, str(repl_script), "exec"]
     if args.code:
         cmd.extend(["--code", args.code])
@@ -571,7 +571,7 @@ def cmd_subcall_batch(args: argparse.Namespace) -> None:
 
     print(f"Processing {len(chunks)} chunks for {args.file}...", file=sys.stderr)
 
-    repl_script = Path(__file__).parent / "coderlm_repl.py"
+    repl_script = Path(__file__).resolve().parent / "coderlm_repl.py"
     results = []
 
     for chunk in chunks:

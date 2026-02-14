@@ -131,6 +131,22 @@ python3 $CLI repl --code "print(search('auth'))"
 
 **Prefer `impl` and `peek` over the Read tool.** They return exactly the code you need — a single function from a 1000-line file, a specific line range — without loading irrelevant code into context. Fall back to Read only when you need an entire small file.
 
+## Response Formats
+
+All commands return JSON. Use these exact field names when parsing output programmatically.
+
+| Command | Response fields |
+|---------|----------------|
+| `grep` | `matches[].file`, `matches[].line`, `matches[].text`, `matches[].context_before`, `matches[].context_after` |
+| `callers` | `callers[].file`, `callers[].line`, `callers[].text` |
+| `search` | `symbols[].name`, `symbols[].kind`, `symbols[].file`, `symbols[].line_range`, `symbols[].signature` |
+| `symbols` | Same as `search` |
+| `impl` | `symbol`, `file`, `implementation` (string) |
+| `tests` | `tests[].name`, `tests[].file`, `tests[].line`, `tests[].signature` |
+| `variables` | `variables[].name`, `variables[].function` |
+| `peek` | `file`, `start`, `end`, `content`, `total_lines` |
+| `structure` | `tree` (string) |
+
 ## Inputs
 
 This skill reads `$ARGUMENTS`. Accepted patterns:
