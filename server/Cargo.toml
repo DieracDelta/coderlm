@@ -36,6 +36,7 @@ tree-sitter-md = "0.5"
 # Concurrency
 dashmap = "6"
 parking_lot = "0.12"
+rayon = "1"
 
 # Search
 regex = "1"

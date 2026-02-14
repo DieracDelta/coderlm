@@ -173,8 +173,74 @@ pub fn extract_symbols_from_file(
     Ok(symbols)
 }
 
-/// Extract symbols from all files in the tree. Runs on blocking threads
-/// with bounded concurrency.
+/// Extract call expressions from a file and return (callee_name, line, text) tuples.
+fn extract_call_sites(
+    root: &Path,
+    rel_path: &str,
+    language: Language,
+) -> Vec<(String, usize, String)> {
+    let config = match queries::get_language_config(language) {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+
+    let abs_path = root.join(rel_path);
+    let source = if language == Language::Pdf {
+        match crate::index::pdf::convert_pdf(root, rel_path) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        }
+    } else {
+        match std::fs::read_to_string(&abs_path) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        }
+    };
+
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&config.language).is_err() {
+        return Vec::new();
+    }
+
+    let tree = match parser.parse(&source, None) {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+
+    let query = match tree_sitter::Query::new(&config.language, config.callers_query) {
+        Ok(q) => q,
+        Err(_) => return Vec::new(),
+    };
+
+    let capture_names: Vec<String> = query.capture_names().iter().map(|s| s.to_string()).collect();
+    let callee_idx = capture_names.iter().position(|n| n == "callee");
+
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
+    let mut results = Vec::new();
+    let lines: Vec<&str> = source.lines().collect();
+
+    while let Some(m) = matches.next() {
+        for cap in m.captures {
+            if Some(cap.index as usize) == callee_idx {
+                let text = cap.node.utf8_text(source.as_bytes()).unwrap_or("");
+                if !text.is_empty() {
+                    let line_num = cap.node.start_position().row + 1;
+                    let line_text = lines
+                        .get(line_num.saturating_sub(1))
+                        .map(|l| l.trim().to_string())
+                        .unwrap_or_default();
+                    results.push((text.to_string(), line_num, line_text));
+                }
+            }
+        }
+    }
+
+    results
+}
+
+/// Extract symbols from all files in the tree using rayon for parallelism.
+/// Also builds the reverse call graph for O(1) caller lookups.
 pub async fn extract_all_symbols(
     root: &Path,
     file_tree: &Arc<FileTree>,
@@ -185,7 +251,7 @@ pub async fn extract_all_symbols(
     let symbol_table = symbol_table.clone();
 
     let count = tokio::task::spawn_blocking(move || -> Result<usize> {
-        let mut total = 0;
+        use rayon::prelude::*;
 
         let paths: Vec<(String, Language)> = file_tree
             .files
@@ -194,22 +260,45 @@ pub async fn extract_all_symbols(
             .map(|e| (e.key().clone(), e.value().language))
             .collect();
 
-        for (rel_path, language) in paths {
-            match extract_symbols_from_file(&root, &rel_path, language) {
-                Ok(symbols) => {
-                    let count = symbols.len();
-                    for sym in symbols {
-                        symbol_table.insert(sym);
+        // Phase 1: Extract symbols in parallel
+        let results: Vec<(String, Language, Vec<Symbol>)> = paths
+            .par_iter()
+            .filter_map(|(rel_path, language)| {
+                match extract_symbols_from_file(&root, rel_path, *language) {
+                    Ok(symbols) => Some((rel_path.clone(), *language, symbols)),
+                    Err(e) => {
+                        debug!("Failed to extract symbols from {}: {}", rel_path, e);
+                        None
                     }
-                    // Mark file as having symbols extracted
-                    if let Some(mut entry) = file_tree.files.get_mut(&rel_path) {
-                        entry.symbols_extracted = true;
-                    }
-                    total += count;
                 }
-                Err(e) => {
-                    debug!("Failed to extract symbols from {}: {}", rel_path, e);
-                }
+            })
+            .collect();
+
+        // Insert symbols (sequential — DashMap is thread-safe but we batch for efficiency)
+        let mut total = 0;
+        for (rel_path, _, symbols) in &results {
+            let count = symbols.len();
+            for sym in symbols {
+                symbol_table.insert(sym.clone());
+            }
+            if let Some(mut entry) = file_tree.files.get_mut(rel_path) {
+                entry.symbols_extracted = true;
+            }
+            total += count;
+        }
+
+        // Phase 2: Build reverse call graph in parallel
+        let call_sites: Vec<(String, Vec<(String, usize, String)>)> = paths
+            .par_iter()
+            .map(|(rel_path, language)| {
+                let sites = extract_call_sites(&root, rel_path, *language);
+                (rel_path.clone(), sites)
+            })
+            .collect();
+
+        for (rel_path, sites) in call_sites {
+            for (callee_name, line, text) in sites {
+                symbol_table.add_caller(&callee_name, &rel_path, line, &text);
             }
         }
 

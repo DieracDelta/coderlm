@@ -31,8 +31,8 @@ pub fn peek(
 
     let abs_path = root.join(file);
     let source = if entry.language == Language::Pdf {
-        crate::index::pdf::get_cached_markdown(root, file)
-            .ok_or_else(|| format!("PDF '{}' not converted yet", file))?
+        crate::index::pdf::convert_pdf(root, file)
+            .map_err(|e| format!("PDF conversion failed for '{}': {}", file, e))?
     } else {
         std::fs::read_to_string(&abs_path).map_err(|e| format!("Failed to read '{}': {}", file, e))?
     };
@@ -129,9 +129,9 @@ pub fn grep_with_scope(
     for (rel_path, language) in &paths {
         let abs_path = root.join(rel_path);
         let source = if *language == Language::Pdf {
-            match crate::index::pdf::get_cached_markdown(root, rel_path) {
-                Some(s) => s,
-                None => continue,
+            match crate::index::pdf::convert_pdf(root, rel_path) {
+                Ok(s) => s,
+                Err(_) => continue,
             }
         } else {
             match std::fs::read_to_string(&abs_path) {
@@ -329,8 +329,8 @@ pub fn chunk_indices(
 
     let abs_path = root.join(file);
     let source = if entry.language == Language::Pdf {
-        crate::index::pdf::get_cached_markdown(root, file)
-            .ok_or_else(|| format!("PDF '{}' not converted yet", file))?
+        crate::index::pdf::convert_pdf(root, file)
+            .map_err(|e| format!("PDF conversion failed for '{}': {}", file, e))?
     } else {
         std::fs::read_to_string(&abs_path).map_err(|e| format!("Failed to read '{}': {}", file, e))?
     };

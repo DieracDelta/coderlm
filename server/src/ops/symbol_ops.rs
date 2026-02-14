@@ -9,11 +9,11 @@ use crate::symbols::queries;
 use crate::symbols::symbol::{Symbol, SymbolKind};
 use crate::symbols::SymbolTable;
 
-/// Read file source, using cached markdown for PDFs.
+/// Read file source, converting PDFs to markdown on-demand.
 fn read_source(root: &Path, rel_path: &str, language: Language) -> Result<String, String> {
     if language == Language::Pdf {
-        crate::index::pdf::get_cached_markdown(root, rel_path)
-            .ok_or_else(|| format!("PDF '{}' not converted yet", rel_path))
+        crate::index::pdf::convert_pdf(root, rel_path)
+            .map_err(|e| format!("PDF conversion failed for '{}': {}", rel_path, e))
     } else {
         let abs_path = root.join(rel_path);
         std::fs::read_to_string(&abs_path)
@@ -99,8 +99,8 @@ pub fn redefine_symbol(
     }
 }
 
-/// Find callers of a symbol using tree-sitter call-expression queries.
-/// Falls back to regex for files without tree-sitter support.
+/// Find callers of a symbol. Uses the pre-built reverse call graph for O(1)
+/// lookup when available, falling back to per-file tree-sitter/regex scan.
 pub fn find_callers(
     root: &Path,
     file_tree: &Arc<FileTree>,
@@ -114,6 +114,21 @@ pub fn find_callers(
         .get(file, symbol_name)
         .ok_or_else(|| format!("Symbol '{}' not found in '{}'", symbol_name, file))?;
 
+    // Fast path: use cached reverse call graph
+    if let Some(cached) = symbol_table.get_callers(symbol_name) {
+        let callers: Vec<CallerInfo> = cached
+            .into_iter()
+            .take(limit)
+            .map(|c| CallerInfo {
+                file: c.file,
+                line: c.line,
+                text: c.text,
+            })
+            .collect();
+        return Ok(callers);
+    }
+
+    // Slow path: scan all files (call graph not yet built)
     let mut callers = Vec::new();
 
     for entry in file_tree.files.iter() {
