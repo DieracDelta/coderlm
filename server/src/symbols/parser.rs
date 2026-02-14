@@ -22,7 +22,12 @@ pub fn extract_symbols_from_file(
     };
 
     let abs_path = root.join(rel_path);
-    let source = std::fs::read_to_string(&abs_path)?;
+    let source = if language == Language::Pdf {
+        crate::index::pdf::convert_pdf(root, rel_path)
+            .map_err(|e| { warn!("PDF conversion failed for {}: {}", rel_path, e); e })?
+    } else {
+        std::fs::read_to_string(&abs_path)?
+    };
 
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&config.language)?;

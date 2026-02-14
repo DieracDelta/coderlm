@@ -24,13 +24,18 @@ pub fn peek(
     start: usize,
     end: usize,
 ) -> Result<PeekResponse, String> {
-    if file_tree.get(file).is_none() {
-        return Err(format!("File '{}' not found in index", file));
-    }
+    let entry = match file_tree.get(file) {
+        Some(e) => e,
+        None => return Err(format!("File '{}' not found in index", file)),
+    };
 
     let abs_path = root.join(file);
-    let source =
-        std::fs::read_to_string(&abs_path).map_err(|e| format!("Failed to read '{}': {}", file, e))?;
+    let source = if entry.language == Language::Pdf {
+        crate::index::pdf::get_cached_markdown(root, file)
+            .ok_or_else(|| format!("PDF '{}' not converted yet", file))?
+    } else {
+        std::fs::read_to_string(&abs_path).map_err(|e| format!("Failed to read '{}': {}", file, e))?
+    };
 
     let lines: Vec<&str> = source.lines().collect();
     let total_lines = lines.len();
@@ -123,9 +128,16 @@ pub fn grep_with_scope(
 
     for (rel_path, language) in &paths {
         let abs_path = root.join(rel_path);
-        let source = match std::fs::read_to_string(&abs_path) {
-            Ok(s) => s,
-            Err(_) => continue,
+        let source = if *language == Language::Pdf {
+            match crate::index::pdf::get_cached_markdown(root, rel_path) {
+                Some(s) => s,
+                None => continue,
+            }
+        } else {
+            match std::fs::read_to_string(&abs_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            }
         };
 
         // For scope=code, build a set of byte ranges that are inside comments/strings
@@ -239,6 +251,10 @@ fn compute_non_code_ranges(source: &str, language: Language) -> Vec<(usize, usiz
             (raw_string_literal) @skip
             (interpreted_string_literal) @skip
         "#,
+        Language::Markdown | Language::Pdf => r#"
+            (fenced_code_block) @skip
+            (indented_code_block) @skip
+        "#,
         _ => return Vec::new(),
     };
 
@@ -306,13 +322,18 @@ pub fn chunk_indices(
     if overlap >= size {
         return Err("Overlap must be < chunk size".to_string());
     }
-    if file_tree.get(file).is_none() {
-        return Err(format!("File '{}' not found in index", file));
-    }
+    let entry = match file_tree.get(file) {
+        Some(e) => e,
+        None => return Err(format!("File '{}' not found in index", file)),
+    };
 
     let abs_path = root.join(file);
-    let source =
-        std::fs::read_to_string(&abs_path).map_err(|e| format!("Failed to read '{}': {}", file, e))?;
+    let source = if entry.language == Language::Pdf {
+        crate::index::pdf::get_cached_markdown(root, file)
+            .ok_or_else(|| format!("PDF '{}' not converted yet", file))?
+    } else {
+        std::fs::read_to_string(&abs_path).map_err(|e| format!("Failed to read '{}': {}", file, e))?
+    };
 
     let total_bytes = source.len();
     let step = size - overlap;

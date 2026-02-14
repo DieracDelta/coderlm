@@ -1,5 +1,6 @@
 pub mod go;
 pub mod lean;
+pub mod markdown;
 pub mod python;
 pub mod rust;
 pub mod typescript;
@@ -15,6 +16,7 @@ pub fn get_language_config(lang: Language) -> Option<LanguageConfig> {
         Language::JavaScript => Some(typescript::js_config()),
         Language::Go => Some(go::config()),
         Language::Lean => Some(lean::config()),
+        Language::Markdown | Language::Pdf => Some(markdown::config()),
         _ => None,
     }
 }

@@ -9,6 +9,18 @@ use crate::symbols::queries;
 use crate::symbols::symbol::{Symbol, SymbolKind};
 use crate::symbols::SymbolTable;
 
+/// Read file source, using cached markdown for PDFs.
+fn read_source(root: &Path, rel_path: &str, language: Language) -> Result<String, String> {
+    if language == Language::Pdf {
+        crate::index::pdf::get_cached_markdown(root, rel_path)
+            .ok_or_else(|| format!("PDF '{}' not converted yet", rel_path))
+    } else {
+        let abs_path = root.join(rel_path);
+        std::fs::read_to_string(&abs_path)
+            .map_err(|e| format!("Failed to read '{}': {}", rel_path, e))
+    }
+}
+
 pub fn list_symbols(
     symbol_table: &Arc<SymbolTable>,
     kind_filter: Option<SymbolKind>,
@@ -44,9 +56,7 @@ pub fn get_implementation(
         .get(file, symbol_name)
         .ok_or_else(|| format!("Symbol '{}' not found in '{}'", symbol_name, file))?;
 
-    let abs_path = root.join(&sym.file);
-    let source = std::fs::read_to_string(&abs_path)
-        .map_err(|e| format!("Failed to read '{}': {}", sym.file, e))?;
+    let source = read_source(root, &sym.file, sym.language)?;
 
     let start = sym.byte_range.0;
     let end = sym.byte_range.1.min(source.len());
@@ -109,9 +119,8 @@ pub fn find_callers(
     for entry in file_tree.files.iter() {
         let rel_path = entry.key().clone();
         let language = entry.value().language;
-        let abs_path = root.join(&rel_path);
 
-        let source = match std::fs::read_to_string(&abs_path) {
+        let source = match read_source(root, &rel_path, language) {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -294,8 +303,7 @@ pub fn find_tests(
         }
 
         // Read the test function body and check if it references the target symbol
-        let abs_path = root.join(&sym.file);
-        let source = match std::fs::read_to_string(&abs_path) {
+        let source = match read_source(root, &sym.file, sym.language) {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -366,9 +374,7 @@ pub fn list_variables(
         .get(file, function_name)
         .ok_or_else(|| format!("Symbol '{}' not found in '{}'", function_name, file))?;
 
-    let abs_path = root.join(&sym.file);
-    let source = std::fs::read_to_string(&abs_path)
-        .map_err(|e| format!("Failed to read '{}': {}", sym.file, e))?;
+    let source = read_source(root, &sym.file, sym.language)?;
 
     let start = sym.byte_range.0;
     let end = sym.byte_range.1.min(source.len());

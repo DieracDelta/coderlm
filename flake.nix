@@ -30,6 +30,7 @@
               extensions = [ "rust-src" "rust-analyzer" ];
             })
             pkgs.pkg-config
+            (pkgs.python3.withPackages (ps: [ ps.pymupdf4llm ]))
           ];
 
           # tree-sitter crates compile C/C++ grammars

@@ -128,6 +128,13 @@ fn handle_file_change(
     let language = entry.language;
     file_tree.insert(entry);
 
+    // Re-convert PDF before symbol extraction
+    if language == crate::index::file_entry::Language::Pdf {
+        if let Err(e) = crate::index::pdf::convert_pdf(root, rel_path) {
+            debug!("Failed to re-convert PDF {}: {}", rel_path, e);
+        }
+    }
+
     // Re-extract symbols
     symbol_table.remove_file(rel_path);
     if language.has_tree_sitter_support() {
