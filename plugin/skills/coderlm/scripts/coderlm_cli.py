@@ -517,6 +517,100 @@ def cmd_repl(args: argparse.Namespace) -> None:
     sys.exit(result.returncode)
 
 
+# ── Subcall results ───────────────────────────────────────────────────
+
+
+def cmd_subcall_results(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_get(state, "/subcall_results"))
+
+
+def cmd_clear_subcall_results(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_delete_req(state, "/subcall_results"))
+
+
+def cmd_subcall_batch(args: argparse.Namespace) -> None:
+    """Run llm_query on each semantic chunk of a file."""
+    import subprocess
+    state = _load_state()
+
+    # Get semantic chunks
+    params = {"file": args.file}
+    if args.max_chunk_bytes is not None:
+        params["max_chunk_bytes"] = args.max_chunk_bytes
+    chunks_resp = _get(state, "/semantic_chunks", params)
+    chunks = chunks_resp.get("chunks", [])
+
+    print(f"Processing {len(chunks)} chunks for {args.file}...", file=sys.stderr)
+
+    repl_script = Path(__file__).parent / "coderlm_repl.py"
+    results = []
+
+    for chunk in chunks:
+        chunk_id = f"{args.file}_chunk_{chunk['index']}"
+        # Load chunk into buffer
+        buf_name = f"chunk_{chunk['index']}"
+        _post(state, "/buffers/from-file", {
+            "name": buf_name,
+            "file": args.file,
+            "start": chunk["line_start"],
+            "end": chunk["line_end"],
+        })
+
+        # Get buffer content for the subcall
+        peek_resp = _get(
+            state,
+            f"/buffers/{urllib.parse.quote(buf_name, safe='')}/peek",
+            {"start": 0, "end": chunk["byte_end"] - chunk["byte_start"]},
+        )
+        content = peek_resp.get("content", "")
+
+        # Run llm_query via REPL
+        code = (
+            f"result = llm_query("
+            f"{json.dumps(args.query)}, "
+            f"context={json.dumps(content)}, "
+            f"chunk_id={json.dumps(chunk_id)})\n"
+            f"print(json.dumps(result, indent=2))"
+        )
+        proc = subprocess.run(
+            [sys.executable, str(repl_script), "exec", "--code", code],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+
+        if proc.returncode == 0:
+            try:
+                exec_result = json.loads(proc.stdout)
+                stdout = exec_result.get("stdout", "")
+                try:
+                    parsed = json.loads(stdout)
+                    results.append(parsed)
+                    findings_count = len(parsed.get("findings", []))
+                    print(
+                        f"  chunk {chunk['index']}: {findings_count} findings",
+                        file=sys.stderr,
+                    )
+                except json.JSONDecodeError:
+                    print(
+                        f"  chunk {chunk['index']}: completed (non-JSON output)",
+                        file=sys.stderr,
+                    )
+            except json.JSONDecodeError:
+                print(f"  chunk {chunk['index']}: error parsing exec output", file=sys.stderr)
+        else:
+            print(f"  chunk {chunk['index']}: FAILED ({proc.stderr[:200]})", file=sys.stderr)
+
+    # Store aggregated results as a variable
+    _post(state, "/vars", {"name": "subcall_batch_results", "value": results})
+
+    print(f"\nDone. {len(results)} chunks processed.", file=sys.stderr)
+    print(f"Results stored in 'subcall_batch_results' variable.", file=sys.stderr)
+    _output({"results": results, "count": len(results)})
+
+
 def cmd_cleanup(args: argparse.Namespace) -> None:
     state = _load_state()
     if not state.get("session_id"):
@@ -744,6 +838,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_repl = sub.add_parser("repl", help="Execute code in the RLM REPL environment")
     p_repl.add_argument("--code", help="Code to execute (reads stdin if omitted)")
     p_repl.set_defaults(func=cmd_repl)
+
+    # subcall-results
+    p_sr = sub.add_parser("subcall-results", help="List all stored subcall results")
+    p_sr.set_defaults(func=cmd_subcall_results)
+
+    # clear-subcall-results
+    p_csr = sub.add_parser("clear-subcall-results", help="Clear all stored subcall results")
+    p_csr.set_defaults(func=cmd_clear_subcall_results)
+
+    # subcall-batch
+    p_sb = sub.add_parser("subcall-batch", help="Run llm_query on each semantic chunk of a file")
+    p_sb.add_argument("file", help="File to analyze")
+    p_sb.add_argument("query", help="Question to answer about each chunk")
+    p_sb.add_argument("--max-chunk-bytes", type=int, default=None, help="Max chunk size in bytes")
+    p_sb.set_defaults(func=cmd_subcall_batch)
 
     # cleanup
     p_clean = sub.add_parser("cleanup", help="Delete the current session")

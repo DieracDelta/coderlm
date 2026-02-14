@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 
 use crate::ops::{annotations, content, history, repl, structure, symbol_ops};
 use crate::server::errors::AppError;
-use crate::server::session::{ReplState, Session};
+use crate::server::session::{Finding, ReplState, Session, SubcallResult};
 use crate::server::state::{AppState, Project};
 use crate::symbols::symbol::SymbolKind;
 
@@ -115,6 +115,11 @@ pub fn build_routes(state: AppState) -> Router {
         )
         // Semantic chunks
         .route("/api/v1/semantic_chunks", get(semantic_chunks))
+        // Subcall results
+        .route(
+            "/api/v1/subcall_results",
+            get(list_subcall_results).post(store_subcall_result).delete(clear_subcall_results),
+        )
         .with_state(state)
 }
 
@@ -965,4 +970,94 @@ async fn semantic_chunks(
     let preview = format!("{} chunks for {}", count, params.file);
     record_history(&state, session_id(&headers).as_deref(), "GET", "/semantic_chunks", &preview);
     Ok(Json(json!({ "file": params.file, "chunks": chunks, "count": count })))
+}
+
+// ---------------------------------------------------------------------------
+// Subcall results
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct StoreSubcallBody {
+    chunk_id: String,
+    query: String,
+    #[serde(default)]
+    findings: Vec<FindingBody>,
+    #[serde(default)]
+    suggested_queries: Vec<String>,
+    answer_if_complete: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FindingBody {
+    point: String,
+    #[serde(default)]
+    evidence: String,
+    #[serde(default = "default_confidence")]
+    confidence: String,
+}
+
+fn default_confidence() -> String {
+    "medium".to_string()
+}
+
+async fn store_subcall_result(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<StoreSubcallBody>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let result = SubcallResult {
+        chunk_id: body.chunk_id.clone(),
+        query: body.query,
+        findings: body
+            .findings
+            .into_iter()
+            .map(|f| Finding {
+                point: f.point,
+                evidence: f.evidence,
+                confidence: f.confidence,
+            })
+            .collect(),
+        suggested_queries: body.suggested_queries,
+        answer_if_complete: body.answer_if_complete,
+        created_at: chrono::Utc::now(),
+    };
+    repl::add_subcall_result(&repl, result);
+    record_history(
+        &state,
+        session_id(&headers).as_deref(),
+        "POST",
+        "/subcall_results",
+        &body.chunk_id,
+    );
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn list_subcall_results(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    let results = repl::list_subcall_results(&repl);
+    let count = results.len();
+    Ok(Json(json!({ "results": results, "count": count })))
+}
+
+async fn clear_subcall_results(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+    repl::clear_subcall_results(&repl);
+    record_history(
+        &state,
+        session_id(&headers).as_deref(),
+        "DELETE",
+        "/subcall_results",
+        "cleared",
+    );
+    Ok(Json(json!({ "ok": true })))
 }

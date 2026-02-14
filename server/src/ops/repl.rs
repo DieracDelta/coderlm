@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::index::file_entry::Language;
 use crate::index::file_tree::FileTree;
-use crate::server::session::{Buffer, BufferInfo, BufferSource, ReplState};
+use crate::server::session::{Buffer, BufferInfo, BufferSource, ReplState, SubcallResult};
 use crate::symbols::SymbolTable;
 
 // ── Buffer operations ────────────────────────────────────────────────
@@ -181,6 +181,20 @@ pub fn var_delete(repl: &Arc<ReplState>, name: &str) -> Result<(), String> {
 
 pub fn check_final(repl: &Arc<ReplState>) -> Option<serde_json::Value> {
     repl.variables.get("Final").map(|v| v.value().clone())
+}
+
+// ── Subcall results ──────────────────────────────────────────────────
+
+pub fn add_subcall_result(repl: &Arc<ReplState>, result: SubcallResult) {
+    repl.subcall_results.lock().push(result);
+}
+
+pub fn list_subcall_results(repl: &Arc<ReplState>) -> Vec<SubcallResult> {
+    repl.subcall_results.lock().clone()
+}
+
+pub fn clear_subcall_results(repl: &Arc<ReplState>) {
+    repl.subcall_results.lock().clear();
 }
 
 // ── Semantic chunking ────────────────────────────────────────────────

@@ -67,12 +67,32 @@ impl BufferInfo {
     }
 }
 
+// ── Subcall results ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubcallResult {
+    pub chunk_id: String,
+    pub query: String,
+    pub findings: Vec<Finding>,
+    pub suggested_queries: Vec<String>,
+    pub answer_if_complete: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Finding {
+    pub point: String,
+    pub evidence: String,
+    pub confidence: String,
+}
+
 // ── REPL state ───────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
 pub struct ReplState {
     pub buffers: DashMap<String, Buffer>,
     pub variables: DashMap<String, serde_json::Value>,
+    pub subcall_results: parking_lot::Mutex<Vec<SubcallResult>>,
 }
 
 // ── History & Session ────────────────────────────────────────────────

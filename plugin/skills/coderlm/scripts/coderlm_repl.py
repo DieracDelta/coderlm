@@ -233,12 +233,125 @@ def add_finding(text: str) -> None:
     set_var("findings", findings)
 
 
-def llm_query(prompt: str, context: str = "") -> str:
-    """Delegate a question to a sub-LM. (Phase 2 stub)"""
-    raise NotImplementedError(
-        "llm_query() is not yet implemented. It will be available in Phase 2 "
-        "(sub-LM dispatch via Claude Code subagent)."
-    )
+def subcall_results() -> list[dict]:
+    """Get all stored subcall results."""
+    result = _get(_STATE, "/subcall_results")
+    return result.get("results", [])
+
+
+def clear_subcall_results() -> None:
+    """Clear all stored subcall results."""
+    _delete(_STATE, "/subcall_results")
+
+
+def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
+    """Delegate a question to a sub-LM via the coderlm-subcall agent.
+
+    Args:
+        prompt: The question to answer about the context.
+        context: Text to analyze (inline). If empty, prompt should reference
+                 a buffer or file to read.
+        chunk_id: Identifier for tracking this subcall's result.
+
+    Returns:
+        Parsed JSON result dict with findings, suggested_queries, etc.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        raise RuntimeError("'claude' CLI not found on PATH. Install Claude Code to use llm_query().")
+
+    # Build the agent file path (relative to plugin root)
+    agent_file = Path(__file__).parent.parent.parent.parent / "agents" / "coderlm-subcall.md"
+    if not agent_file.exists():
+        # Try project-level .claude/agents/
+        agent_file = Path(".claude/agents/coderlm-subcall.md")
+    if not agent_file.exists():
+        raise RuntimeError(
+            f"coderlm-subcall agent not found. Expected at: {agent_file}\n"
+            "Copy plugin/agents/coderlm-subcall.md to .claude/agents/"
+        )
+
+    # Build the prompt for the subagent
+    full_prompt = f"Query: {prompt}\n"
+    if chunk_id:
+        full_prompt += f"Chunk ID: {chunk_id}\n"
+    if context:
+        full_prompt += f"\n--- CONTEXT ---\n{context}\n--- END CONTEXT ---\n"
+
+    # Write prompt to temp file for large contexts
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        f.write(full_prompt)
+        prompt_file = f.name
+
+    try:
+        result = subprocess.run(
+            [
+                claude_bin,
+                "--print",
+                "--output-format", "text",
+                "--agent-file", str(agent_file),
+                "--prompt", full_prompt,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    finally:
+        os.unlink(prompt_file)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Subagent failed (exit {result.returncode}): {result.stderr[:500]}")
+
+    # Parse the JSON response
+    output = result.stdout.strip()
+    # Try to extract JSON from the output (subagent might include extra text)
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        # Try to find JSON object in the output
+        start = output.find("{")
+        end = output.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(output[start:end])
+            except json.JSONDecodeError:
+                parsed = {
+                    "chunk_id": chunk_id or "unknown",
+                    "findings": [{"point": output[:500], "evidence": "", "confidence": "low"}],
+                    "suggested_queries": [],
+                    "answer_if_complete": None,
+                }
+        else:
+            parsed = {
+                "chunk_id": chunk_id or "unknown",
+                "findings": [{"point": output[:500], "evidence": "", "confidence": "low"}],
+                "suggested_queries": [],
+                "answer_if_complete": None,
+            }
+
+    # Store result on the server
+    if not parsed.get("chunk_id"):
+        parsed["chunk_id"] = chunk_id or "unknown"
+    _post(_STATE, "/subcall_results", {
+        "chunk_id": parsed.get("chunk_id", chunk_id),
+        "query": prompt,
+        "findings": parsed.get("findings", parsed.get("relevant", [])),
+        "suggested_queries": parsed.get("suggested_queries", parsed.get("suggested_next_queries", [])),
+        "answer_if_complete": parsed.get("answer_if_complete"),
+    })
+
+    # Also store as a buffer for later reference
+    buffer_name = f"subcall_{parsed.get('chunk_id', chunk_id or 'unknown')}"
+    try:
+        create_buffer(buffer_name, json.dumps(parsed, indent=2), f"subcall result for: {prompt[:100]}")
+    except RuntimeError:
+        pass  # non-critical
+
+    return parsed
 
 
 # ── Exec engine ───────────────────────────────────────────────────────
@@ -269,6 +382,8 @@ def _build_namespace() -> dict:
         "set_final": set_final,
         "add_finding": add_finding,
         "llm_query": llm_query,
+        "subcall_results": subcall_results,
+        "clear_subcall_results": clear_subcall_results,
         # Standard library conveniences
         "json": json,
     }
