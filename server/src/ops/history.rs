@@ -48,3 +48,75 @@ pub fn get_all_history(state: &AppState, limit: usize) -> Vec<SessionHistoryBloc
 
     blocks
 }
+
+/// Compact history: group consecutive same-path operations into summaries,
+/// keeping the most recent `keep_recent` entries uncompacted.
+pub fn compact_history(
+    state: &AppState,
+    session_id: &str,
+    keep_recent: usize,
+) -> Result<CompactResult, String> {
+    let mut session = state
+        .inner
+        .sessions
+        .get_mut(session_id)
+        .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+
+    let total = session.history.len();
+    if total <= keep_recent {
+        return Ok(CompactResult {
+            original_count: total,
+            compacted_count: total,
+            removed: 0,
+        });
+    }
+
+    let split_point = total - keep_recent;
+    let to_compact = &session.history[..split_point];
+    let recent = session.history[split_point..].to_vec();
+
+    // Group consecutive entries by (method, path)
+    let mut compacted: Vec<HistoryEntry> = Vec::new();
+    let mut i = 0;
+    while i < to_compact.len() {
+        let current = &to_compact[i];
+        let mut count = 1;
+        while i + count < to_compact.len()
+            && to_compact[i + count].method == current.method
+            && to_compact[i + count].path == current.path
+        {
+            count += 1;
+        }
+
+        if count > 1 {
+            compacted.push(HistoryEntry {
+                timestamp: current.timestamp,
+                method: current.method.clone(),
+                path: current.path.clone(),
+                response_preview: format!("[{} calls compacted]", count),
+            });
+        } else {
+            compacted.push(current.clone());
+        }
+        i += count;
+    }
+
+    let compacted_count = compacted.len() + recent.len();
+    let removed = total - compacted_count;
+
+    compacted.extend(recent);
+    session.history = compacted;
+
+    Ok(CompactResult {
+        original_count: total,
+        compacted_count,
+        removed,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct CompactResult {
+    pub original_count: usize,
+    pub compacted_count: usize,
+    pub removed: usize,
+}

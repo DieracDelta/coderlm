@@ -100,6 +100,33 @@ python3 $CLI redefine-symbol SYMBOL --file FILE "description"
 python3 $CLI mark FILE TYPE
 python3 $CLI save-annotations
 python3 $CLI load-annotations
+
+# RLM: Buffers (server-side, metadata-only responses)
+python3 $CLI buffer-list
+python3 $CLI buffer-create NAME "content" [--description "..."]
+python3 $CLI buffer-from-file NAME FILE [--start N] [--end N]
+python3 $CLI buffer-from-symbol NAME SYMBOL --file FILE
+python3 $CLI buffer-info NAME
+python3 $CLI buffer-peek NAME [--start N] [--end N]
+python3 $CLI buffer-delete NAME
+
+# RLM: Variables (server-side key-value store)
+python3 $CLI var-list
+python3 $CLI var-set NAME 'json_value'
+python3 $CLI var-get NAME
+python3 $CLI var-delete NAME
+python3 $CLI check-final
+
+# RLM: Semantic chunks (symbol-aligned chunking)
+python3 $CLI semantic-chunks FILE [--max-chunk-bytes 5000]
+
+# RLM: Sub-LM dispatch
+python3 $CLI subcall-results
+python3 $CLI clear-subcall-results
+python3 $CLI subcall-batch FILE "question" [--max-chunk-bytes 5000]
+
+# RLM: REPL (execute Python with injected coderlm helpers)
+python3 $CLI repl --code "print(search('auth'))"
 ```
 
 **Prefer `impl` and `peek` over the Read tool.** They return exactly the code you need — a single function from a 1000-line file, a specific line range — without loading irrelevant code into context. Fall back to Read only when you need an entire small file.

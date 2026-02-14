@@ -93,6 +93,9 @@ pub struct ReplState {
     pub buffers: DashMap<String, Buffer>,
     pub variables: DashMap<String, serde_json::Value>,
     pub subcall_results: parking_lot::Mutex<Vec<SubcallResult>>,
+    /// Rough estimate of total bytes stored (buffers + variables).
+    #[allow(dead_code)]
+    pub estimated_bytes: std::sync::atomic::AtomicUsize,
 }
 
 // ── History & Session ────────────────────────────────────────────────

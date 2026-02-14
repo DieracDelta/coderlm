@@ -94,6 +94,9 @@ pub fn build_routes(state: AppState) -> Router {
         .route("/api/v1/chunk_indices", get(chunk_indices))
         // History
         .route("/api/v1/history", get(get_history))
+        .route("/api/v1/history/compact", post(compact_history))
+        // Context budget
+        .route("/api/v1/context_budget", get(context_budget))
         // Annotations
         .route("/api/v1/annotations/save", post(save_annotations))
         .route("/api/v1/annotations/load", post(load_annotations))
@@ -671,6 +674,55 @@ async fn get_history(
             Ok(Json(json!({ "sessions": blocks, "total_entries": total })))
         }
     }
+}
+
+#[derive(Deserialize)]
+struct CompactQuery {
+    keep_recent: Option<usize>,
+}
+
+async fn compact_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<CompactQuery>,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let sid = require_session(&headers)?;
+    let keep = params.keep_recent.unwrap_or(20);
+    let result = history::compact_history(&state, &sid, keep).map_err(AppError::NotFound)?;
+    record_history(&state, session_id(&headers).as_deref(), "POST", "/history/compact", "compacted");
+    Ok(Json(serde_json::to_value(result).unwrap()))
+}
+
+async fn context_budget(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, AppError> {
+    let _project = require_project(&state, &headers)?;
+    let repl = require_repl(&state, &headers)?;
+
+    let buffer_bytes: usize = repl.buffers.iter().map(|e| e.value().content.len()).sum();
+    let var_bytes: usize = repl
+        .variables
+        .iter()
+        .map(|e| serde_json::to_string(e.value()).unwrap_or_default().len())
+        .sum();
+    let subcall_count = repl.subcall_results.lock().len();
+    let buffer_count = repl.buffers.len();
+    let var_count = repl.variables.len();
+    let total_bytes = buffer_bytes + var_bytes;
+    // Rough token estimate (~4 chars per token)
+    let estimated_tokens = total_bytes / 4;
+
+    Ok(Json(json!({
+        "buffer_count": buffer_count,
+        "buffer_bytes": buffer_bytes,
+        "variable_count": var_count,
+        "variable_bytes": var_bytes,
+        "subcall_count": subcall_count,
+        "total_bytes": total_bytes,
+        "estimated_tokens": estimated_tokens,
+    })))
 }
 
 // ---------------------------------------------------------------------------

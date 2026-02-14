@@ -400,6 +400,33 @@ def cmd_load_annotations(args: argparse.Namespace) -> None:
     _output(_post(state, "/annotations/load", {}))
 
 
+# ── History compaction & context budget ─────────────────────────────────
+
+
+def cmd_compact_history(args: argparse.Namespace) -> None:
+    state = _load_state()
+    params = {}
+    if args.keep_recent is not None:
+        params["keep_recent"] = args.keep_recent
+    _output(_post_with_params(state, "/history/compact", params))
+
+
+def cmd_context_budget(args: argparse.Namespace) -> None:
+    state = _load_state()
+    _output(_get(state, "/context_budget"))
+
+
+def _post_with_params(state: dict, path: str, params: dict) -> dict:
+    """POST with query parameters (for compact endpoint)."""
+    base = _base_url(state)
+    url = f"{base}{path}"
+    if params:
+        clean = {k: v for k, v in params.items() if v is not None}
+        if clean:
+            url += "?" + urllib.parse.urlencode(clean)
+    return _request("POST", url, headers={"X-Session-Id": _session_id(state)})
+
+
 # ── Buffer commands ────────────────────────────────────────────────────
 
 
@@ -853,6 +880,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_sb.add_argument("query", help="Question to answer about each chunk")
     p_sb.add_argument("--max-chunk-bytes", type=int, default=None, help="Max chunk size in bytes")
     p_sb.set_defaults(func=cmd_subcall_batch)
+
+    # compact-history
+    p_ch = sub.add_parser("compact-history", help="Compact session history (group repeated operations)")
+    p_ch.add_argument("--keep-recent", type=int, default=None, help="Keep this many recent entries uncompacted")
+    p_ch.set_defaults(func=cmd_compact_history)
+
+    # context-budget
+    p_cb = sub.add_parser("context-budget", help="Show estimated context budget usage")
+    p_cb.set_defaults(func=cmd_context_budget)
 
     # cleanup
     p_clean = sub.add_parser("cleanup", help="Delete the current session")
