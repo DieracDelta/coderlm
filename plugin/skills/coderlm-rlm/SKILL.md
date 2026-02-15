@@ -17,58 +17,57 @@ Parse `$ARGUMENTS` for: `query=<question>` (required), `target=<file_or_module>`
 CLI=".claude/coderlm_state/coderlm_cli.py"
 ```
 
+## Algorithm 1: Recursive Language Model
+
+All interaction goes through the REPL. You write Python code, see only metadata (stdout_lines, stdout_preview, stdout_size). No coderlm output enters the conversation directly. Content analysis is delegated to haiku via `llm_query()`.
+
 ## Step 1: Initialize
 
 ```bash
 python3 $CLI init
-python3 $CLI var-set query '"<the user question>"'
-python3 $CLI var-set status '"scouting"'
+python3 $CLI repl --code "
+set_var('query', '<the user question>')
+set_var('status', 'scouting')
+"
 ```
 
-## Step 2: Scout
-
-All commands return metadata-only — no source enters the conversation.
+## Step 2: Scout (via REPL)
 
 ```bash
-python3 $CLI structure --depth 2   # meta-only: {file_count, language_breakdown, buffer}
-python3 $CLI search <key_terms>
-python3 $CLI grep <patterns> --scope code
-python3 $CLI impl <symbol> --file <file>
-# impl returns: {symbol, file, lines, bytes, preview, buffer: "impl::file::symbol"}
+python3 $CLI repl --code "
+results = search('<key_terms>')
+print(f'Found {len(results)} symbols')
+for r in results[:10]:
+    print(f'  {r[\"name\"]} in {r[\"file\"]} ({r[\"kind\"]})')
+"
+
+python3 $CLI repl --code "
+matches = grep('<pattern>', scope='code')
+print(f'{len(matches)} matches')
+for m in matches[:10]:
+    print(f'  {m[\"file\"]}:{m[\"line\"]}')
+"
 ```
 
-## Step 3: Load Buffers
-
-Buffers are auto-created by `impl`, `callers`, `tests`, `peek`, `grep`.
-For additional content:
-
-```bash
-python3 $CLI buffer-from-file main_rs src/main.rs --start 0 --end 200
-python3 $CLI buffer-from-symbol handler_fn handle_request --file src/routes.rs
-```
-
-## Step 4: Semantic Chunking
-
-```bash
-python3 $CLI semantic-chunks src/routes.rs --max-chunk-bytes 5000
-```
-
-## Step 5: Subcall Loop
+## Step 3: Analyze (delegate to sub-LM)
 
 Batch (preferred for file-wide analysis):
 ```bash
 python3 $CLI subcall-batch src/routes.rs "What auth checks exist?" --max-chunk-bytes 5000
 ```
 
-Targeted (using auto-created buffers):
+Targeted (using REPL + llm_query):
 ```bash
 python3 $CLI repl --code "
-content = peek('impl::src/auth.rs::authenticate', 0, 5000)
-result = llm_query('What auth methods?', context=content, chunk_id='auth')
+source = impl_('authenticate', 'src/auth.rs')
+result = llm_query('What auth methods does this use?', context=source, chunk_id='auth')
+print(f'Findings: {len(result.get(\"findings\", []))}')
+for f in result.get('findings', []):
+    print(f'  [{f[\"confidence\"]}] {f[\"point\"]}')
 "
 ```
 
-## Step 6: Collect Findings
+## Step 4: Collect Findings
 
 ```bash
 python3 $CLI repl --code "
@@ -76,11 +75,14 @@ results = subcall_results()
 for r in results:
     for f in r.get('findings', []):
         add_finding(f'{f[\"point\"]} ({f[\"confidence\"]})')
-print(get_var('findings'))
+findings = get_var('findings')
+print(f'{len(findings)} findings collected')
+for f in findings[:5]:
+    print(f'  - {f}')
 "
 ```
 
-## Step 7: Synthesize
+## Step 5: Synthesize
 
 ```bash
 python3 $CLI repl --code "
@@ -92,10 +94,10 @@ Check: `python3 $CLI check-final`. If `is_set: true`, present to user. Otherwise
 
 ## Rules
 
-- **NEVER read source content into the conversation.** No `buffer-peek`, no `peek --full`, no `impl --full`, no `Read` on source files. Every byte of content in the conversation persists in history and compounds token cost on every subsequent turn.
-- **ALL content analysis goes through subagents.** Use `subcall-batch` (preferred for file-wide analysis) or `llm_query` (for targeted chunks). Subagents read content server-side via haiku — the root LLM never sees the source.
-- Scout commands (`structure`, `search`, `grep`, `symbols`, `impl`, `peek`, `callers`, `tests`) return metadata only (names, line numbers, byte sizes, buffer references). Use them freely for navigation. List results are capped (search: 5, symbols: 10, callers/tests/grep: 5) — check `"truncated"` and `"total_count"` fields.
-- Subcalls can recurse up to `CODERLM_MAX_DEPTH` (default 3). If a subcall needs to understand code outside its chunk, it will automatically spawn deeper subcalls. Set the `CODERLM_MAX_DEPTH` env var to control recursion depth.
-- Prefer `subcall-batch` over individual `llm_query` — it handles chunking and parallelism automatically.
+- **ALL coderlm interaction goes through the REPL.** Never call index commands (search, impl, callers, grep, etc.) as direct CLI commands — they are blocked outside REPL/subcall context.
+- **The REPL returns metadata only.** You see `{stdout_lines, stdout_preview (200 chars), stdout_size}`. No full output enters the conversation. Write Python code that prints what you need to see.
+- **Content analysis goes through sub-LMs.** Use `llm_query()` or `subcall-batch` — haiku reads content server-side, you see only structured findings.
+- Subcalls can recurse up to `CODERLM_MAX_DEPTH` (default 3). Sub-LMs can spawn their own subcalls for cross-module dependencies.
+- Prefer `subcall-batch` over individual `llm_query` for file-wide analysis.
 - Max 3 loop iterations before synthesizing with available findings.
 - If subcall fails, skip and continue. If server disconnects, re-run `init`.

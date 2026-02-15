@@ -171,8 +171,19 @@ def _delete_req(state: dict, path: str) -> dict:
 
 
 def _is_subcall() -> bool:
-    """True when running inside a subcall (haiku subagent) context."""
+    """True when running inside a subcall (haiku subagent) or REPL context."""
     return os.environ.get("CODERLM_SUBCALL") == "1"
+
+
+def _require_repl(cmd_name: str, repl_example: str) -> bool:
+    """Block index commands outside subcall/REPL context. Returns True if blocked."""
+    if _is_subcall():
+        return False
+    _output({
+        "error": f"'{cmd_name}' is restricted to REPL/subcall context.",
+        "hint": f"Use: python3 $CLI repl --code \"{repl_example}\"",
+    })
+    return True
 
 
 def _cap_list(result: dict, key: str, max_items: int = 5) -> dict:
@@ -272,6 +283,8 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 
 def cmd_structure(args: argparse.Namespace) -> None:
+    if _require_repl("structure", "print(search('main'))"):
+        return
     state = _load_state()
     params = {}
     if args.depth is not None:
@@ -282,6 +295,8 @@ def cmd_structure(args: argparse.Namespace) -> None:
 
 
 def cmd_symbols(args: argparse.Namespace) -> None:
+    if _require_repl("symbols", "print(symbols(file='src/main.rs'))"):
+        return
     state = _load_state()
     params = {}
     if args.kind:
@@ -294,6 +309,8 @@ def cmd_symbols(args: argparse.Namespace) -> None:
 
 
 def cmd_search(args: argparse.Namespace) -> None:
+    if _require_repl("search", "print(search('auth'))"):
+        return
     state = _load_state()
     params = {"q": args.query}
     if args.limit is not None:
@@ -302,6 +319,8 @@ def cmd_search(args: argparse.Namespace) -> None:
 
 
 def cmd_impl(args: argparse.Namespace) -> None:
+    if _require_repl("impl", "print(impl_('my_func', 'src/main.rs'))"):
+        return
     state = _load_state()
     params = {"symbol": args.symbol, "file": args.file}
     if not args.full or not _is_subcall():
@@ -310,6 +329,8 @@ def cmd_impl(args: argparse.Namespace) -> None:
 
 
 def cmd_callers(args: argparse.Namespace) -> None:
+    if _require_repl("callers", "print(callers('my_func', 'src/main.rs'))"):
+        return
     state = _load_state()
     params = {"symbol": args.symbol, "file": args.file}
     if args.limit is not None:
@@ -320,6 +341,8 @@ def cmd_callers(args: argparse.Namespace) -> None:
 
 
 def cmd_tests(args: argparse.Namespace) -> None:
+    if _require_repl("tests", "print(tests('my_func', 'src/main.rs'))"):
+        return
     state = _load_state()
     params = {"symbol": args.symbol, "file": args.file}
     if args.limit is not None:
@@ -330,12 +353,16 @@ def cmd_tests(args: argparse.Namespace) -> None:
 
 
 def cmd_variables(args: argparse.Namespace) -> None:
+    if _require_repl("variables", "print(symbols(file='src/main.rs'))"):
+        return
     state = _load_state()
     params = {"function": args.function, "file": args.file}
     _output(_get(state, "/symbols/variables", params))
 
 
 def cmd_peek(args: argparse.Namespace) -> None:
+    if _require_repl("peek", "print(peek_file('src/main.rs', 0, 50))"):
+        return
     state = _load_state()
     params = {"file": args.file}
     if args.start is not None:
@@ -348,6 +375,8 @@ def cmd_peek(args: argparse.Namespace) -> None:
 
 
 def cmd_grep(args: argparse.Namespace) -> None:
+    if _require_repl("grep", "print(grep('pattern', scope='code'))"):
+        return
     state = _load_state()
     params = {"pattern": args.pattern}
     if args.max_matches is not None:

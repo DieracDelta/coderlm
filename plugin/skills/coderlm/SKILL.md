@@ -1,6 +1,6 @@
 ---
 name: coderlm
-description: "Primary tool for all code navigation and reading in supported languages (Rust, Python, TypeScript, JavaScript, Go, Lean, Markdown). Use instead of Read, Grep, and Glob for finding symbols, reading function implementations, tracing callers, discovering tests, and understanding execution paths. Provides tree-sitter-backed indexing that returns exact source code — full function bodies, call sites with line numbers, test locations — without loading entire files into context. Use for: finding functions by name or pattern, reading specific implementations, answering 'what calls X', 'where does this error come from', 'how does X work', tracing from entrypoint to outcome, and any codebase exploration. Use Read only for config files and unsupported languages."
+description: "Primary tool for all code navigation and reading in supported languages (Rust, Python, TypeScript, JavaScript, Go, Lean, Markdown). Use instead of Read, Grep, and Glob for finding symbols, reading function implementations, tracing callers, discovering tests, and understanding execution paths. All interaction goes through the REPL — you write Python code, see only metadata about results. Use Read only for config files and unsupported languages."
 allowed-tools:
   - Bash
   - Read
@@ -8,7 +8,7 @@ allowed-tools:
 
 # CodeRLM — Structural Codebase Exploration
 
-Tree-sitter-backed index server. Knows every function, caller, symbol, test. Use instead of grep/glob/read.
+Tree-sitter-backed index server. All queries go through the REPL — you write Python code, see metadata-only responses. No coderlm output enters the conversation directly.
 
 ## CLI Setup
 
@@ -16,70 +16,93 @@ Tree-sitter-backed index server. Knows every function, caller, symbol, test. Use
 CLI=".claude/coderlm_state/coderlm_cli.py"
 ```
 
-**Use ONLY the exact flags listed below. No `--path`, no `--glob`. Unlisted flags cause errors.**
-
-## Commands
+## Session Management (direct CLI)
 
 ```bash
-# Session
 python3 $CLI init [--cwd PATH] [--port N]
 python3 $CLI status
 python3 $CLI cleanup
+python3 $CLI check-final
+```
 
-# Explore
-python3 $CLI structure [--depth N]
-python3 $CLI search QUERY [--limit N]
-python3 $CLI symbols [--file FILE] [--kind KIND] [--limit N]
+## REPL (all exploration goes here)
 
-# Retrieve (metadata-only; content stays server-side)
-python3 $CLI impl SYMBOL --file FILE
-python3 $CLI callers SYMBOL --file FILE [--limit N]
-python3 $CLI tests SYMBOL --file FILE [--limit N]
-python3 $CLI peek FILE [--start N] [--end N]
-python3 $CLI grep PATTERN [--max-matches N] [--context-lines N] [--scope all|code]
-python3 $CLI variables FUNCTION --file FILE
+All index queries (search, symbols, impl, callers, tests, peek, grep) are REPL-only. The REPL captures stdout and returns metadata: `{stdout_lines, stdout_preview (200 chars), stdout_size}`. Full output stays server-side.
 
-# Annotations
+```bash
+# Navigate
+python3 $CLI repl --code "
+results = search('authenticate')
+print(f'Found {len(results)} symbols')
+for r in results[:5]:
+    print(f'  {r[\"name\"]} in {r[\"file\"]} ({r[\"kind\"]})')
+"
+
+# Read implementations
+python3 $CLI repl --code "
+source = impl_('handle_request', 'src/routes.rs')
+print(f'Source: {len(source)} chars')
+"
+
+# Trace callers
+python3 $CLI repl --code "
+c = callers('authenticate', 'src/auth.rs')
+print(f'{len(c)} callers')
+for call in c[:5]:
+    print(f'  {call[\"file\"]}:{call[\"line\"]}')
+"
+
+# Grep
+python3 $CLI repl --code "
+matches = grep('TODO|FIXME', scope='code')
+print(f'{len(matches)} matches')
+"
+
+# Delegate content analysis to haiku sub-LM
+python3 $CLI repl --code "
+result = llm_query('What auth checks exist?', context=impl_('authenticate', 'src/auth.rs'), chunk_id='auth')
+print(json.dumps(result, indent=2))
+"
+```
+
+### Available REPL functions
+
+**Index queries:** `search(q)`, `symbols(file, kind, limit)`, `impl_(symbol, file)`, `callers(symbol, file)`, `tests(symbol, file)`, `grep(pattern, scope)`, `peek_file(file, start, end)`
+
+**Buffers:** `load_buffer(name, file, start, end)`, `load_symbol(name, symbol, file)`, `create_buffer(name, content)`, `peek(buffer_name, start, end)`, `list_buffers()`, `delete_buffer(name)`
+
+**Variables:** `set_var(name, value)`, `get_var(name)`, `list_vars()`
+
+**RLM:** `llm_query(prompt, context, chunk_id)`, `subcall_results()`, `clear_subcall_results()`, `set_final(result)`, `add_finding(text)`
+
+**Persistence:** `last_output()`, `save_result(name, value)`, `get_result(name)`
+
+## Batch Analysis (direct CLI)
+
+For file-wide analysis, `subcall-batch` is a convenience wrapper:
+
+```bash
+python3 $CLI subcall-batch src/routes.rs "What auth checks exist?" [--max-chunk-bytes 5000]
+```
+
+## Annotations (direct CLI)
+
+```bash
 python3 $CLI define-file FILE "description"
 python3 $CLI define-symbol SYMBOL --file FILE "description"
 python3 $CLI save-annotations
 python3 $CLI load-annotations
-
-# Buffers & Variables (server-side state)
-python3 $CLI buffer-list
-python3 $CLI buffer-from-file NAME FILE [--start N] [--end N]
-python3 $CLI buffer-from-symbol NAME SYMBOL --file FILE
-python3 $CLI var-set NAME 'json_value'
-python3 $CLI var-get NAME
-
-# RLM
-python3 $CLI semantic-chunks FILE [--max-chunk-bytes 5000]
-python3 $CLI subcall-batch FILE "question" [--max-chunk-bytes 5000]
-python3 $CLI repl --code "print(search('auth'))"
 ```
-
-## Meta-mode (enforced)
-
-`structure`, `impl`, `callers`, `tests`, `peek`, `grep` return **metadata + buffer name** only.
-Full content is auto-stored server-side in buffers. To analyze content, use `subcall-batch` or `/coderlm-rlm`.
-
-- Returns `{symbol, file, lines, bytes, preview, buffer}`. No source enters the conversation.
-- List results are capped (search: 5, symbols: 10, callers/tests/grep: 5). If `"truncated": true`, the response includes `"total_count"` showing total matches. Use subcalls to analyze full results.
-- `--full` and `buffer-peek` are restricted to subcall context. They are no-ops when called directly.
 
 ## Workflow
 
 1. `init` — create session, index project
-2. `structure` / `search` / `grep` — find the entrypoint
-3. `impl` — locate the function (returns metadata: file, lines, bytes, buffer name)
-4. `callers` — trace what calls it, `impl` on those callers
-5. `tests` — find test coverage
-6. Repeat 3–5 until the execution path is clear
-7. For deep analysis of content, use `subcall-batch` or `/coderlm-rlm`
-8. `define-symbol` / `define-file` — annotate as understanding solidifies
+2. REPL: `search()` / `grep()` — find entrypoints (see metadata preview only)
+3. REPL: `impl_()` / `callers()` — navigate the call graph
+4. REPL: `llm_query()` — delegate content understanding to haiku
+5. REPL: `set_final()` — store conclusion
+6. For deep multi-file analysis, use `/coderlm-rlm`
 
 ## Inputs
 
 This skill reads `$ARGUMENTS`: `query=<question>` (required), `cwd=<path>` (optional).
-
-For response format details and full API reference, see [references/api-reference.md](references/api-reference.md).
