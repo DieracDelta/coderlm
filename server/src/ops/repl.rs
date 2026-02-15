@@ -125,8 +125,8 @@ pub fn buffer_peek(
         .ok_or_else(|| format!("Buffer '{}' not found", name))?;
 
     let content = &buf.content;
-    let start = start.min(content.len());
-    let end = end.min(content.len());
+    let start = content.floor_char_boundary(start.min(content.len()));
+    let end = content.floor_char_boundary(end.min(content.len()));
     Ok(content[start..end].to_string())
 }
 
