@@ -170,6 +170,11 @@ def _delete_req(state: dict, path: str) -> dict:
     return _request("DELETE", url, headers={"X-Session-Id": _session_id(state)})
 
 
+def _is_subcall() -> bool:
+    """True when running inside a subcall (haiku subagent) context."""
+    return os.environ.get("CODERLM_SUBCALL") == "1"
+
+
 def _output(result: dict) -> None:
     print(json.dumps(result, indent=2))
 
@@ -257,7 +262,7 @@ def cmd_structure(args: argparse.Namespace) -> None:
     params = {}
     if args.depth is not None:
         params["depth"] = args.depth
-    if not args.full:
+    if not args.full or not _is_subcall():
         params["meta"] = "true"
     _output(_get(state, "/structure", params))
 
@@ -285,7 +290,7 @@ def cmd_search(args: argparse.Namespace) -> None:
 def cmd_impl(args: argparse.Namespace) -> None:
     state = _load_state()
     params = {"symbol": args.symbol, "file": args.file}
-    if not args.full:
+    if not args.full or not _is_subcall():
         params["meta"] = "true"
     _output(_get(state, "/symbols/implementation", params))
 
@@ -295,7 +300,7 @@ def cmd_callers(args: argparse.Namespace) -> None:
     params = {"symbol": args.symbol, "file": args.file}
     if args.limit is not None:
         params["limit"] = args.limit
-    if not args.full:
+    if not args.full or not _is_subcall():
         params["meta"] = "true"
     _output(_get(state, "/symbols/callers", params))
 
@@ -305,7 +310,7 @@ def cmd_tests(args: argparse.Namespace) -> None:
     params = {"symbol": args.symbol, "file": args.file}
     if args.limit is not None:
         params["limit"] = args.limit
-    if not args.full:
+    if not args.full or not _is_subcall():
         params["meta"] = "true"
     _output(_get(state, "/symbols/tests", params))
 
@@ -323,7 +328,7 @@ def cmd_peek(args: argparse.Namespace) -> None:
         params["start"] = args.start
     if args.end is not None:
         params["end"] = args.end
-    if not args.full:
+    if not args.full or not _is_subcall():
         params["meta"] = "true"
     _output(_get(state, "/peek", params))
 
@@ -337,7 +342,7 @@ def cmd_grep(args: argparse.Namespace) -> None:
         params["context_lines"] = args.context_lines
     if args.scope is not None:
         params["scope"] = args.scope
-    if not args.full:
+    if not args.full or not _is_subcall():
         params["meta"] = "true"
     _output(_get(state, "/grep", params))
 
@@ -481,6 +486,9 @@ def cmd_buffer_info(args: argparse.Namespace) -> None:
 
 
 def cmd_buffer_peek(args: argparse.Namespace) -> None:
+    if not _is_subcall():
+        _output({"error": "buffer-peek is restricted to subcall context. Use subcall-batch or llm_query to analyze buffer content."})
+        return
     state = _load_state()
     params = {}
     if args.start is not None:
