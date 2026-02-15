@@ -68,26 +68,25 @@ def _state_dir() -> Path:
     return base
 
 
-STATE_DIR = _state_dir()
-STATE_FILE = STATE_DIR / "session.json"
-
-
 def _load_state() -> dict:
-    if not STATE_FILE.exists():
+    state_file = _state_dir() / "session.json"
+    if not state_file.exists():
         return {}
-    with STATE_FILE.open() as f:
+    with state_file.open() as f:
         return json.load(f)
 
 
 def _save_state(state: dict) -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    with STATE_FILE.open("w") as f:
+    state_dir = _state_dir()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    with (state_dir / "session.json").open("w") as f:
         json.dump(state, f, indent=2)
 
 
 def _clear_state() -> None:
-    if STATE_FILE.exists():
-        STATE_FILE.unlink()
+    state_file = _state_dir() / "session.json"
+    if state_file.exists():
+        state_file.unlink()
 
 
 def _base_url(state: dict) -> str:
@@ -208,10 +207,18 @@ def _output(result: dict) -> None:
 
 
 def cmd_init(args: argparse.Namespace) -> None:
+    import uuid as _uuid
+
     cwd = os.path.abspath(args.cwd or os.getcwd())
     host = args.host or "127.0.0.1"
     port = args.port or int(os.environ.get("CODERLM_PORT", 3002))
     base = f"http://{host}:{port}/api/v1"
+
+    # Generate instance ID for concurrent session isolation.
+    # If CODERLM_INSTANCE is already set (e.g. by the user or a parent process),
+    # reuse it.  Otherwise generate a short UUID.
+    instance = os.environ.get("CODERLM_INSTANCE") or str(_uuid.uuid4())[:8]
+    os.environ["CODERLM_INSTANCE"] = instance
 
     # Check server health first
     try:
@@ -226,10 +233,8 @@ def cmd_init(args: argparse.Namespace) -> None:
         try:
             _request("GET", f"{base}/sessions/{sid}")
             print(f"Session reused: {sid}")
+            print(f"Instance: {instance}")
             print(f"Project: {cwd}")
-            print(f"Server: {health.get('status', 'ok')} "
-                  f"({health.get('projects', 0)} projects, "
-                  f"{health.get('active_sessions', 0)} sessions)")
             return
         except SystemExit:
             pass  # session expired or invalid, create a new one
@@ -241,15 +246,14 @@ def cmd_init(args: argparse.Namespace) -> None:
         "host": host,
         "port": port,
         "project": cwd,
+        "instance": instance,
         "created_at": result.get("created_at", ""),
     }
     _save_state(state)
 
     print(f"Session created: {result['session_id']}")
+    print(f"Instance: {instance}")
     print(f"Project: {cwd}")
-    print(f"Server: {health.get('status', 'ok')} "
-          f"({health.get('projects', 0)} projects, "
-          f"{health.get('active_sessions', 0)} sessions)")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
