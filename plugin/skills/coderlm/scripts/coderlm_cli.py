@@ -175,6 +175,20 @@ def _is_subcall() -> bool:
     return os.environ.get("CODERLM_SUBCALL") == "1"
 
 
+def _cap_list(result: dict, key: str, max_items: int = 5) -> dict:
+    """Cap list results outside subcall context to a short preview."""
+    if _is_subcall():
+        return result
+    items = result.get(key, [])
+    if len(items) <= max_items:
+        return result
+    result = dict(result)
+    result[key] = items[:max_items]
+    result["total_count"] = len(items)
+    result["truncated"] = True
+    return result
+
+
 def _output(result: dict) -> None:
     print(json.dumps(result, indent=2))
 
@@ -276,7 +290,7 @@ def cmd_symbols(args: argparse.Namespace) -> None:
         params["file"] = args.file
     if args.limit is not None:
         params["limit"] = args.limit
-    _output(_get(state, "/symbols", params))
+    _output(_cap_list(_get(state, "/symbols", params), "symbols", 10))
 
 
 def cmd_search(args: argparse.Namespace) -> None:
@@ -284,7 +298,7 @@ def cmd_search(args: argparse.Namespace) -> None:
     params = {"q": args.query}
     if args.limit is not None:
         params["limit"] = args.limit
-    _output(_get(state, "/symbols/search", params))
+    _output(_cap_list(_get(state, "/symbols/search", params), "symbols", 5))
 
 
 def cmd_impl(args: argparse.Namespace) -> None:
@@ -302,7 +316,7 @@ def cmd_callers(args: argparse.Namespace) -> None:
         params["limit"] = args.limit
     if not args.full or not _is_subcall():
         params["meta"] = "true"
-    _output(_get(state, "/symbols/callers", params))
+    _output(_cap_list(_get(state, "/symbols/callers", params), "callers", 5))
 
 
 def cmd_tests(args: argparse.Namespace) -> None:
@@ -312,7 +326,7 @@ def cmd_tests(args: argparse.Namespace) -> None:
         params["limit"] = args.limit
     if not args.full or not _is_subcall():
         params["meta"] = "true"
-    _output(_get(state, "/symbols/tests", params))
+    _output(_cap_list(_get(state, "/symbols/tests", params), "tests", 5))
 
 
 def cmd_variables(args: argparse.Namespace) -> None:
@@ -344,7 +358,7 @@ def cmd_grep(args: argparse.Namespace) -> None:
         params["scope"] = args.scope
     if not args.full or not _is_subcall():
         params["meta"] = "true"
-    _output(_get(state, "/grep", params))
+    _output(_cap_list(_get(state, "/grep", params), "matches", 5))
 
 
 def cmd_chunks(args: argparse.Namespace) -> None:
