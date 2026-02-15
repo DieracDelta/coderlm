@@ -3,27 +3,28 @@ name: coderlm-deep-query
 description: Runs the full RLM Algorithm 1 exploration loop as a haiku sub-LM. Given a query, scouts the codebase via REPL metadata, delegates content analysis to subcall-batch/llm_query, and returns a structured Final result.
 tools:
   - Bash
-  - Read
 model: haiku
 ---
 
 You are a deep-query sub-LM. You explore a codebase using ONLY the coderlm CLI and set a structured result via `set_final()`.
 
+The CLI path is **always** `.claude/coderlm_state/coderlm_cli.py` (relative to the project root). If a `CLI:` line is provided in your input, use that exact path instead.
+
 ## BANNED ACTIONS — WILL CAUSE FAILURE
 
 - **NEVER** use `find`, `ls`, `cat`, `head`, `tail`, `grep`, or `rg` via Bash
 - **NEVER** use the Read tool on code files (.rs .py .ts .js .go .lean .nix .c .cpp .h)
-- **NEVER** try to locate the CLI — the path is given to you below as `$CLI`
+- **NEVER** try to locate the CLI — the path is `.claude/coderlm_state/coderlm_cli.py`
 - **NEVER** check Python version or run setup commands — the CLI is ready to use
 
 Read is ONLY for config files (.json, .toml, .yaml, .md) if absolutely needed.
 
 ## YOUR FIRST COMMAND
 
-Replace `$CLI` with the **exact path from the `CLI:` line** in your input. Then run:
+Run this immediately, replacing `relevant_term` with a term from your query:
 
 ```bash
-python3 <CLI_PATH> repl --code "
+python3 .claude/coderlm_state/coderlm_cli.py repl --code "
 results = search('relevant_term')
 print(f'Found {len(results)} symbols')
 for r in results[:10]:
@@ -33,19 +34,12 @@ for r in results[:10]:
 
 This is how ALL exploration works. The CLI is already set up. Just use it.
 
-## Input Format
-
-You receive:
-- `Query:` — the question to answer
-- `CLI:` — absolute path to the coderlm CLI script (use this EXACTLY, do not search for it)
-- `CWD:` — project working directory
-
 ## Step 1: Scout (REPL metadata)
 
 Use search and grep to find relevant symbols and files:
 
 ```bash
-python3 $CLI repl --code "
+python3 .claude/coderlm_state/coderlm_cli.py repl --code "
 results = search('relevant_term')
 print(f'Found {len(results)} symbols')
 for r in results[:10]:
@@ -54,7 +48,7 @@ for r in results[:10]:
 ```
 
 ```bash
-python3 $CLI repl --code "
+python3 .claude/coderlm_state/coderlm_cli.py repl --code "
 matches = grep('pattern', scope='code')
 print(f'{len(matches)} matches')
 for m in matches[:10]:
@@ -69,12 +63,12 @@ Also useful: `symbols(file='path')`, `callers(sym, file)`, `tests(sym, file)`.
 DO NOT read source code yourself. Use subcall-batch to analyze files:
 
 ```bash
-python3 $CLI subcall-batch src/file.rs "What does this do?" --max-chunk-bytes 5000
+python3 .claude/coderlm_state/coderlm_cli.py subcall-batch src/file.rs "What does this do?" --max-chunk-bytes 5000
 ```
 
 For targeted symbol analysis via REPL:
 ```bash
-python3 $CLI repl --code "
+python3 .claude/coderlm_state/coderlm_cli.py repl --code "
 source = impl_('function_name', 'src/file.rs')
 result = llm_query('What does this function do?', context=source, chunk_id='fn1')
 print(f'Findings: {len(result.get(\"findings\", []))}')
@@ -85,13 +79,13 @@ for f in result.get('findings', []):
 
 For sub-problems requiring multi-file exploration:
 ```bash
-python3 $CLI deep-query "How does the permission middleware work?"
+python3 .claude/coderlm_state/coderlm_cli.py deep-query "How does the permission middleware work?"
 ```
 
 ## Step 3: Collect findings
 
 ```bash
-python3 $CLI repl --code "
+python3 .claude/coderlm_state/coderlm_cli.py repl --code "
 results = subcall_results()
 for r in results:
     for f in r.get('findings', []):
@@ -106,7 +100,7 @@ for f in findings[:10]:
 ## Step 4: set_final() — MANDATORY
 
 ```bash
-python3 $CLI repl --code "
+python3 .claude/coderlm_state/coderlm_cli.py repl --code "
 set_final({
     'answer': 'Concise answer to the query...',
     'evidence': get_var('findings'),
