@@ -11,11 +11,17 @@ fi
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CLI="$PLUGIN_ROOT/skills/coderlm/scripts/coderlm_cli.py"
-STATE_FILE=".claude/coderlm_state/session.json"
-
 CODERLM_PORT="${CODERLM_PORT:-3002}"
 
-if [ -f "$STATE_FILE" ] && curl -s --max-time 2 "http://127.0.0.1:${CODERLM_PORT}/api/v1/health" > /dev/null 2>&1; then
+# Clean up PID-keyed instance file for this Claude session
+INSTANCES_DIR=".claude/coderlm_state/instances"
+if [ -d "$INSTANCES_DIR" ] && [ -f "$INSTANCES_DIR/$PPID" ]; then
+    CODERLM_INSTANCE=$(cat "$INSTANCES_DIR/$PPID")
+    export CODERLM_INSTANCE
+    rm -f "$INSTANCES_DIR/$PPID"
+fi
+
+if curl -s --max-time 2 "http://127.0.0.1:${CODERLM_PORT}/api/v1/health" > /dev/null 2>&1; then
     python3 "$CLI" save-annotations 2>/dev/null || true
     python3 "$CLI" cleanup 2>/dev/null || true
 fi

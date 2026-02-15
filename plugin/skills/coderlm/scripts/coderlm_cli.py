@@ -53,16 +53,48 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-def _state_dir() -> Path:
-    """Return per-instance state directory.
+def _resolve_instance() -> str | None:
+    """Find the active instance ID.
 
-    If CODERLM_INSTANCE is set (e.g. by session-init.sh), each Claude Code
-    instance gets its own subdirectory so concurrent sessions in the same
-    project don't clobber each other.  Falls back to the flat layout for
-    backward compat.
+    Resolution order:
+    1. CODERLM_INSTANCE env var (explicit override)
+    2. PID-keyed instance file (walk process tree via /proc)
+    3. active_instance file (single-session fallback)
     """
-    base = Path(".claude/coderlm_state")
     inst = os.environ.get("CODERLM_INSTANCE")
+    if inst:
+        return inst
+
+    base = Path(".claude/coderlm_state/instances")
+    if base.exists():
+        pid = os.getpid()
+        while pid > 1:
+            f = base / str(pid)
+            if f.exists():
+                try:
+                    return f.read_text().strip()
+                except OSError:
+                    pass
+            try:
+                stat = Path(f"/proc/{pid}/stat").read_text()
+                pid = int(stat.split()[3])  # field 4 is PPID
+            except (OSError, ValueError, IndexError):
+                break
+
+    hint = Path(".claude/coderlm_state/active_instance")
+    if hint.exists():
+        try:
+            return hint.read_text().strip()
+        except OSError:
+            pass
+
+    return None
+
+
+def _state_dir() -> Path:
+    """Return per-instance state directory."""
+    base = Path(".claude/coderlm_state")
+    inst = _resolve_instance()
     if inst:
         return base / "sessions" / inst
     return base
@@ -214,11 +246,31 @@ def cmd_init(args: argparse.Namespace) -> None:
     port = args.port or int(os.environ.get("CODERLM_PORT", 3002))
     base = f"http://{host}:{port}/api/v1"
 
-    # Generate instance ID for concurrent session isolation.
-    # If CODERLM_INSTANCE is already set (e.g. by the user or a parent process),
-    # reuse it.  Otherwise generate a short UUID.
-    instance = os.environ.get("CODERLM_INSTANCE") or str(_uuid.uuid4())[:8]
+    # Instance isolation: reuse existing instance from env/PID or generate new.
+    instance = _resolve_instance() or str(_uuid.uuid4())[:8]
     os.environ["CODERLM_INSTANCE"] = instance
+
+    # Write PID-keyed instance files so CLI calls from this Claude session
+    # auto-resolve via process tree walk (/proc/PID/stat → PPID chain).
+    # We write at each ancestor PID (up to 5 levels, skipping PID 1).
+    # The read walk hits the closest ancestor first, so even if two sessions
+    # share a parent shell, they each find their own Claude PID's file.
+    instances_dir = Path(".claude/coderlm_state/instances")
+    instances_dir.mkdir(parents=True, exist_ok=True)
+    pid = os.getpid()
+    for _ in range(5):
+        if pid <= 1:
+            break
+        (instances_dir / str(pid)).write_text(instance)
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            pid = int(stat.split()[3])
+        except (OSError, ValueError, IndexError):
+            break
+
+    # Also write active_instance as single-session fallback
+    active_file = Path(".claude/coderlm_state/active_instance")
+    active_file.write_text(instance)
 
     # Check server health first
     try:

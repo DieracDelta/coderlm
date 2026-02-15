@@ -31,9 +31,41 @@ from pathlib import Path
 
 # ── Server communication ──────────────────────────────────────────────
 
+def _resolve_instance() -> str | None:
+    """Find the active instance ID via env, PID walk, or fallback file."""
+    inst = os.environ.get("CODERLM_INSTANCE")
+    if inst:
+        return inst
+
+    base = Path(".claude/coderlm_state/instances")
+    if base.exists():
+        pid = os.getpid()
+        while pid > 1:
+            f = base / str(pid)
+            if f.exists():
+                try:
+                    return f.read_text().strip()
+                except OSError:
+                    pass
+            try:
+                stat = Path(f"/proc/{pid}/stat").read_text()
+                pid = int(stat.split()[3])
+            except (OSError, ValueError, IndexError):
+                break
+
+    hint = Path(".claude/coderlm_state/active_instance")
+    if hint.exists():
+        try:
+            return hint.read_text().strip()
+        except OSError:
+            pass
+
+    return None
+
+
 def _state_dir() -> Path:
     base = Path(".claude/coderlm_state")
-    inst = os.environ.get("CODERLM_INSTANCE")
+    inst = _resolve_instance()
     if inst:
         return base / "sessions" / inst
     return base

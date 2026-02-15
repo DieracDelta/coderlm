@@ -18,25 +18,36 @@ CODERLM_PORT="${CODERLM_PORT:-3002}"
 mkdir -p "$BASE_STATE_DIR"
 ln -sf "$CLI" "$BASE_STATE_DIR/coderlm_cli.py"
 
+# Generate a unique instance ID for this Claude Code session.
+# $PPID is the Claude Code process — all Bash commands from this session
+# share it as an ancestor, so PID-keyed lookup auto-resolves.
+if [ -z "$CODERLM_INSTANCE" ]; then
+    CODERLM_INSTANCE=$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')
+fi
+INSTANCES_DIR="$BASE_STATE_DIR/instances"
+mkdir -p "$INSTANCES_DIR"
+echo -n "$CODERLM_INSTANCE" > "$INSTANCES_DIR/$PPID"
+
+# Also write active_instance as single-session fallback
+echo -n "$CODERLM_INSTANCE" > "$BASE_STATE_DIR/active_instance"
+
+# Clean up stale PID files (processes that no longer exist)
+for f in "$INSTANCES_DIR"/*; do
+    [ -f "$f" ] || continue
+    pid=$(basename "$f")
+    if [ "$pid" != "$PPID" ] && ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$f"
+    fi
+done
+
 # Check server health — if not running, stop here (symlink is set up)
 if ! curl -s --max-time 2 "http://127.0.0.1:${CODERLM_PORT}/api/v1/health" > /dev/null 2>&1; then
     echo "[coderlm] Server not running on port ${CODERLM_PORT}" >&2
     exit 0
 fi
 
-# Without CODERLM_INSTANCE, use the flat layout (backward compat).
-# The CLI's init already reuses valid sessions, so concurrent inits
-# for the same project are safe — they converge on one server session.
-STATE_FILE="$BASE_STATE_DIR/session.json"
-if [ -n "$CODERLM_INSTANCE" ]; then
-    STATE_DIR="$BASE_STATE_DIR/sessions/$CODERLM_INSTANCE"
-    mkdir -p "$STATE_DIR"
-    STATE_FILE="$STATE_DIR/session.json"
-fi
-
-# Auto-init if no active session
-if [ ! -f "$STATE_FILE" ]; then
-    python3 "$CLI" init --port "$CODERLM_PORT" 2>&1 || true
-fi
+# Auto-init with instance ID
+export CODERLM_INSTANCE
+python3 "$CLI" init --port "$CODERLM_PORT" 2>&1 || true
 
 exit 0

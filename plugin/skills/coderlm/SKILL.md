@@ -21,25 +21,14 @@ CLI=".claude/coderlm_state/coderlm_cli.py"
 
 ```bash
 python3 $CLI init [--cwd PATH]
-# Output includes Instance: <id> — save it for all subsequent commands
 ```
-
-**Concurrent session isolation:** `init` generates a unique instance ID. Prefix **all** subsequent CLI calls with it so multiple Claude sessions in the same repo don't collide:
-
-```bash
-CODERLM_INSTANCE=<id> python3 $CLI deep-query "..."
-CODERLM_INSTANCE=<id> python3 $CLI repl --code "..."
-CODERLM_INSTANCE=<id> python3 $CLI subcall-batch FILE "..."
-```
-
-Recursive calls (deep-query → haiku → subcall-batch → llm_query) inherit the instance ID automatically through the environment.
 
 ## Exploration (multi-file)
 
 Use `deep-query` for any question requiring codebase exploration. It spawns a haiku sub-LM that runs the full Algorithm 1 loop (scout, analyze, synthesize) and returns a structured result.
 
 ```bash
-CODERLM_INSTANCE=<id> python3 $CLI deep-query "How does authentication work?"
+python3 $CLI deep-query "How does authentication work?"
 # Returns: {"result": {"answer": "...", "evidence": [...], "files_analyzed": [...]}, "depth": 0}
 ```
 
@@ -50,7 +39,7 @@ The haiku sub-LM can itself call `subcall-batch`, `llm_query`, and even recursiv
 When you already know the file, use `subcall-batch` to analyze it directly:
 
 ```bash
-CODERLM_INSTANCE=<id> python3 $CLI subcall-batch src/routes.rs "What auth checks exist?" [--max-chunk-bytes 5000]
+python3 $CLI subcall-batch src/routes.rs "What auth checks exist?" [--max-chunk-bytes 5000]
 # Returns: {"results": [...], "count": N}
 ```
 
@@ -59,23 +48,25 @@ CODERLM_INSTANCE=<id> python3 $CLI subcall-batch src/routes.rs "What auth checks
 Use the REPL for quick metadata lookups before deciding what to deep-query:
 
 ```bash
-CODERLM_INSTANCE=<id> python3 $CLI repl --code "print(search('auth'))"
-CODERLM_INSTANCE=<id> python3 $CLI repl --code "print(symbols(file='src/main.rs'))"
+python3 $CLI repl --code "print(search('auth'))"
+python3 $CLI repl --code "print(symbols(file='src/main.rs'))"
+python3 $CLI repl --code "print(grep('pattern', scope='code'))"
 ```
 
 ## Annotations (direct CLI)
 
 ```bash
-CODERLM_INSTANCE=<id> python3 $CLI define-file FILE "description"
-CODERLM_INSTANCE=<id> python3 $CLI save-annotations
-CODERLM_INSTANCE=<id> python3 $CLI load-annotations
+python3 $CLI define-file FILE "description"
+python3 $CLI define-symbol SYMBOL --file FILE "description"
+python3 $CLI save-annotations
+python3 $CLI load-annotations
 ```
 
 ## Rules
 
-- **Use `deep-query` for exploration.** Don't run REPL loops in the root context.
+- **Use `deep-query` for exploration.** Don't run REPL loops or direct index commands (structure, symbols, grep, impl, callers, etc.) in the root context. Those are REPL-restricted.
 - **Use `subcall-batch` when you already know the file.**
 - **REPL is for quick metadata only** — use it for pre-flight checks before deciding what to deep-query or subcall-batch.
-- **Always prefix `CODERLM_INSTANCE=<id>`** on every CLI call (except `init`). This ensures concurrent sessions don't clobber each other's state.
 - If `deep-query` returns a warning about no structured Final, the sub-LM may have failed — check the raw result or retry with a more specific query.
 - Max recursion depth is 3 by default. Override with `--max-depth N`.
+- Multiple Claude sessions in the same project are automatically isolated via PID-keyed instance files.
