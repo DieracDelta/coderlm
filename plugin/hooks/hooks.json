@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Use the coderlm skill for all code navigation in supported languages (Rust, Python, TypeScript, JavaScript, Go). Use Read only for config files, markdown, and unsupported languages.'",
+            "command": "echo 'NEVER use Read/Glob/Grep on code files (.rs .py .ts .js .go .lean). Use coderlm: deep-query for exploration, subcall-batch for known files, REPL for metadata. Read is ONLY for config/markdown. Wait for deep-query results before proceeding.'",
             "timeout": 5000
           }
         ]
