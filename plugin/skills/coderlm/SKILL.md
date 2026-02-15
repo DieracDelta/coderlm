@@ -1,6 +1,6 @@
 ---
 name: coderlm
-description: "Recursive Language Model (RLM) for codebase exploration and deep analysis. Use for ALL code navigation in supported languages (Rust, Python, TypeScript, JavaScript, Go, Lean). All interaction goes through the REPL — you write Python code, see only metadata. Content analysis is delegated to haiku sub-LMs via llm_query(). Use Read only for config files, markdown, and unsupported languages."
+description: "Recursive Language Model (RLM) for codebase exploration and deep analysis. Use for ALL code navigation in supported languages (Rust, Python, TypeScript, JavaScript, Go, Lean). Delegates exploration to haiku sub-LMs via deep-query — the root never runs REPL loops. Use Read only for config files, markdown, and unsupported languages."
 allowed-tools:
   - Bash
   - Read
@@ -17,92 +17,41 @@ Parse `$ARGUMENTS` for: `query=<question>` (required), `target=<file_or_module>`
 CLI=".claude/coderlm_state/coderlm_cli.py"
 ```
 
-## Algorithm 1: RLM Loop
-
-All interaction goes through the REPL. You write Python code, see only metadata (stdout_lines, stdout_preview, stdout_size). No coderlm output enters the conversation directly. Content analysis is delegated to haiku via `llm_query()`.
-
-### Step 1: Initialize
+## Setup
 
 ```bash
 python3 $CLI init [--cwd PATH]
-python3 $CLI repl --code "
-set_var('query', '<the user question>')
-set_var('status', 'scouting')
-"
 ```
 
-### Step 2: Scout (via REPL)
+## Exploration (multi-file)
+
+Use `deep-query` for any question requiring codebase exploration. It spawns a haiku sub-LM that runs the full Algorithm 1 loop (scout, analyze, synthesize) and returns a structured result.
 
 ```bash
-python3 $CLI repl --code "
-results = search('<key_terms>')
-print(f'Found {len(results)} symbols')
-for r in results[:10]:
-    print(f'  {r[\"name\"]} in {r[\"file\"]} ({r[\"kind\"]})')
-"
-
-python3 $CLI repl --code "
-matches = grep('<pattern>', scope='code')
-print(f'{len(matches)} matches')
-for m in matches[:10]:
-    print(f'  {m[\"file\"]}:{m[\"line\"]}')
-"
+python3 $CLI deep-query "How does authentication work?"
+# Returns: {"result": {"answer": "...", "evidence": [...], "files_analyzed": [...]}, "depth": 0}
 ```
 
-### Step 3: Analyze (delegate to sub-LM)
+The haiku sub-LM can itself call `subcall-batch`, `llm_query`, and even recursive `deep-query` for sub-problems. Recursion is gated by `CODERLM_MAX_DEPTH` (default 3).
 
-Batch (preferred for file-wide analysis):
-```bash
-python3 $CLI subcall-batch src/routes.rs "What auth checks exist?" --max-chunk-bytes 5000
-```
+## File Analysis (single file)
 
-Targeted (using REPL + llm_query):
-```bash
-python3 $CLI repl --code "
-source = impl_('authenticate', 'src/auth.rs')
-result = llm_query('What auth methods does this use?', context=source, chunk_id='auth')
-print(f'Findings: {len(result.get(\"findings\", []))}')
-for f in result.get('findings', []):
-    print(f'  [{f[\"confidence\"]}] {f[\"point\"]}')
-"
-```
-
-### Step 4: Collect Findings
+When you already know the file, use `subcall-batch` to analyze it directly:
 
 ```bash
-python3 $CLI repl --code "
-results = subcall_results()
-for r in results:
-    for f in r.get('findings', []):
-        add_finding(f'{f[\"point\"]} ({f[\"confidence\"]})')
-findings = get_var('findings')
-print(f'{len(findings)} findings collected')
-for f in findings[:5]:
-    print(f'  - {f}')
-"
+python3 $CLI subcall-batch src/routes.rs "What auth checks exist?" [--max-chunk-bytes 5000]
+# Returns: {"results": [...], "count": N}
 ```
 
-### Step 5: Synthesize
+## Quick Metadata (REPL, for pre-flight only)
+
+Use the REPL for quick metadata lookups before deciding what to deep-query:
 
 ```bash
-python3 $CLI repl --code "
-set_final({'answer': '...', 'evidence': get_var('findings'), 'files_analyzed': [...]})
-"
+python3 $CLI repl --code "print(search('auth'))"
+python3 $CLI repl --code "print(symbols(file='src/main.rs'))"
+python3 $CLI repl --code "print(grep('pattern', scope='code'))"
 ```
-
-Check: `python3 $CLI check-final`. If `is_set: true`, present to user. Otherwise loop to Step 2.
-
-## Available REPL Functions
-
-**Index queries:** `search(q)`, `symbols(file, kind, limit)`, `impl_(symbol, file)`, `callers(symbol, file)`, `tests(symbol, file)`, `grep(pattern, scope)`, `peek_file(file, start, end)`
-
-**Buffers:** `load_buffer(name, file, start, end)`, `load_symbol(name, symbol, file)`, `create_buffer(name, content)`, `peek(buffer_name, start, end)`, `list_buffers()`, `delete_buffer(name)`
-
-**Variables:** `set_var(name, value)`, `get_var(name)`, `list_vars()`
-
-**RLM:** `llm_query(prompt, context, chunk_id)`, `subcall_results()`, `clear_subcall_results()`, `set_final(result)`, `add_finding(text)`
-
-**Persistence:** `last_output()`, `save_result(name, value)`, `get_result(name)`
 
 ## Annotations (direct CLI)
 
@@ -115,10 +64,8 @@ python3 $CLI load-annotations
 
 ## Rules
 
-- **ALL coderlm interaction goes through the REPL.** Index commands (search, impl, callers, grep, etc.) are blocked outside REPL/subcall context.
-- **The REPL returns metadata only.** You see `{stdout_lines, stdout_preview (200 chars), stdout_size}`. Write Python code that prints what you need to see.
-- **Content analysis goes through sub-LMs.** Use `llm_query()` or `subcall-batch` — haiku reads content server-side, you see only structured findings.
-- Subcalls can recurse up to `CODERLM_MAX_DEPTH` (default 3). Sub-LMs can spawn their own subcalls for cross-module dependencies.
-- Prefer `subcall-batch` over individual `llm_query` for file-wide analysis.
-- Max 3 loop iterations before synthesizing with available findings.
-- If subcall fails, skip and continue. If server disconnects, re-run `init`.
+- **Use `deep-query` for exploration.** Don't run REPL loops in the root context.
+- **Use `subcall-batch` when you already know the file.**
+- **REPL is for quick metadata only** — use it for pre-flight checks before deciding what to deep-query or subcall-batch.
+- If `deep-query` returns a warning about no structured Final, the sub-LM may have failed — check the raw result or retry with a more specific query.
+- Max recursion depth is 3 by default. Override with `--max-depth N`.

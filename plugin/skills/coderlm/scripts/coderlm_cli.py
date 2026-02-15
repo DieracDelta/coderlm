@@ -704,6 +704,103 @@ def cmd_subcall_batch(args: argparse.Namespace) -> None:
     _output({"results": results, "count": len(results)})
 
 
+def _load_agent_system_prompt(agent_name: str) -> str:
+    """Load an agent's instructions for use as a system prompt."""
+    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / f"{agent_name}.md"
+    if not agent_file.exists():
+        agent_file = Path(f".claude/agents/{agent_name}.md")
+    if not agent_file.exists():
+        raise RuntimeError(f"{agent_name} agent not found at: {agent_file}")
+    text = agent_file.read_text()
+    # Strip YAML frontmatter
+    if text.startswith("---"):
+        end = text.find("---", 3)
+        if end != -1:
+            text = text[end + 3:].strip()
+    return text
+
+
+def cmd_deep_query(args: argparse.Namespace) -> None:
+    """Run full RLM exploration loop in a haiku sub-LM."""
+    import shutil
+    import subprocess
+
+    state = _load_state()
+    if not state.get("session_id"):
+        _output({"error": "No active session. Run: coderlm_cli.py init"})
+        return
+
+    # Depth tracking (same mechanism as llm_query)
+    depth = int(os.environ.get("CODERLM_DEPTH", "0"))
+    max_depth = int(os.environ.get("CODERLM_MAX_DEPTH", str(args.max_depth or 3)))
+    if depth >= max_depth:
+        _output({"error": f"max recursion depth reached (depth={depth})", "depth": depth})
+        return
+
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        _output({"error": "'claude' CLI not found on PATH"})
+        return
+
+    # Clear Final from previous runs
+    try:
+        _delete_req(state, "/vars/Final")
+    except SystemExit:
+        pass
+
+    # Load deep-query agent prompt
+    system_prompt = _load_agent_system_prompt("coderlm-deep-query")
+
+    # Build user prompt
+    cli_path = ".claude/coderlm_state/coderlm_cli.py"
+    user_prompt = f"Query: {args.query}\nCLI: {cli_path}"
+
+    # Spawn haiku with full REPL access
+    env = {
+        **os.environ,
+        "CODERLM_SUBCALL": "1",
+        "CODERLM_DEPTH": str(depth + 1),
+    }
+    if args.max_depth is not None:
+        env["CODERLM_MAX_DEPTH"] = str(args.max_depth)
+
+    print(f"Deep-query (depth {depth + 1}): {args.query}", file=sys.stderr)
+    result = subprocess.run(
+        [
+            claude_bin,
+            "-p",
+            "--model", "haiku",
+            "--output-format", "text",
+            "--no-session-persistence",
+            "--disable-slash-commands",
+            "--setting-sources", "",
+            "--tools", "Bash,Read",
+            "--system-prompt", system_prompt,
+            user_prompt,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=env,
+    )
+
+    # Read Final variable from server (haiku should have set it)
+    try:
+        final_resp = _get(state, "/vars/Final")
+        if final_resp and final_resp.get("value"):
+            _output({"result": final_resp["value"], "depth": depth})
+            return
+    except SystemExit:
+        pass
+
+    # Fallback: return haiku's raw output (truncated)
+    _output({
+        "result": result.stdout[:2000] if result.stdout else None,
+        "depth": depth,
+        "warning": "no structured Final set by sub-LM",
+    })
+
+
 def cmd_cleanup(args: argparse.Namespace) -> None:
     state = _load_state()
     if not state.get("session_id"):
@@ -984,6 +1081,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_sb.add_argument("query", help="Question to answer about each chunk")
     p_sb.add_argument("--max-chunk-bytes", type=int, default=None, help="Max chunk size in bytes")
     p_sb.set_defaults(func=cmd_subcall_batch)
+
+    # deep-query
+    p_dq = sub.add_parser("deep-query", help="Run full RLM exploration loop in haiku sub-LM")
+    p_dq.add_argument("query", help="Exploration question")
+    p_dq.add_argument("--max-depth", type=int, default=None, help="Override CODERLM_MAX_DEPTH")
+    p_dq.set_defaults(func=cmd_deep_query)
 
     # compact-history
     p_ch = sub.add_parser("compact-history", help="Compact session history (group repeated operations)")

@@ -292,15 +292,20 @@ def clear_subcall_results() -> None:
     _delete(_STATE, "/subcall_results")
 
 
-def _load_agent_system_prompt() -> str:
-    """Load the coderlm-subcall agent instructions for use as a system prompt."""
-    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / "coderlm-subcall.md"
+def _load_agent_system_prompt(agent_name: str = "coderlm-subcall") -> str:
+    """Load an agent's instructions for use as a system prompt.
+
+    Args:
+        agent_name: Base name of the agent file (without .md extension).
+                    Defaults to "coderlm-subcall".
+    """
+    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / f"{agent_name}.md"
     if not agent_file.exists():
-        agent_file = Path(".claude/agents/coderlm-subcall.md")
+        agent_file = Path(f".claude/agents/{agent_name}.md")
     if not agent_file.exists():
         raise RuntimeError(
-            f"coderlm-subcall agent not found. Expected at: {agent_file}\n"
-            "Copy plugin/agents/coderlm-subcall.md to .claude/agents/"
+            f"{agent_name} agent not found. Expected at: {agent_file}\n"
+            f"Copy plugin/agents/{agent_name}.md to .claude/agents/"
         )
     text = agent_file.read_text()
     # Strip YAML frontmatter
