@@ -92,11 +92,10 @@ Check: `python3 $CLI check-final`. If `is_set: true`, present to user. Otherwise
 
 ## Rules
 
-- **NEVER call `buffer-peek` on buffers > 500 bytes.** That dumps content into the conversation, defeating meta-mode.
-- To read small content (config, short docs): use `peek --full` or `impl --full` directly.
-- To analyze large code/files: use `subcall-batch` or `llm_query` — they read buffers server-side via haiku, keeping content out of the conversation.
-- Never do the two-step anti-pattern: `peek` (meta) → `buffer-peek` (full dump). Either use `--full` or delegate to a subcall.
-- Prefer `subcall-batch` over individual `llm_query` for file-wide analysis.
+- **NEVER read source content into the conversation.** No `buffer-peek`, no `peek --full`, no `impl --full`, no `Read` on source files. Every byte of content in the conversation persists in history and compounds token cost on every subsequent turn.
+- **ALL content analysis goes through subagents.** Use `subcall-batch` (preferred for file-wide analysis) or `llm_query` (for targeted chunks). Subagents read content server-side via haiku — the root LLM never sees the source.
+- Scout commands (`structure`, `search`, `grep`, `symbols`, `impl`, `peek`, `callers`, `tests`) return metadata only (names, line numbers, byte sizes, buffer references). Use them freely for navigation.
 - Subcalls can recurse up to `CODERLM_MAX_DEPTH` (default 3). If a subcall needs to understand code outside its chunk, it will automatically spawn deeper subcalls. Set the `CODERLM_MAX_DEPTH` env var to control recursion depth.
+- Prefer `subcall-batch` over individual `llm_query` — it handles chunking and parallelism automatically.
 - Max 3 loop iterations before synthesizing with available findings.
 - If subcall fails, skip and continue. If server disconnects, re-run `init`.
