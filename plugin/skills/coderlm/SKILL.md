@@ -27,7 +27,7 @@ python3 $CLI status
 python3 $CLI cleanup
 
 # Explore
-python3 $CLI structure [--depth N] [--full]
+python3 $CLI structure [--depth N]
 python3 $CLI search QUERY [--limit N]
 python3 $CLI symbols [--file FILE] [--kind KIND] [--limit N]
 
@@ -64,7 +64,8 @@ python3 $CLI repl --code "print(search('auth'))"
 Full content is auto-stored server-side in buffers. To analyze content, use `subcall-batch` or `/coderlm-rlm`.
 
 - Returns `{symbol, file, lines, bytes, preview, buffer}`. No source enters the conversation.
-- `--full` flag exists but is restricted to subcall context (haiku subagents). It is a no-op when called directly.
+- List results are capped (search: 5, symbols: 10, callers/tests/grep: 5). If `"truncated": true`, the response includes `"total_count"` showing total matches. Use subcalls to analyze full results.
+- `--full` and `buffer-peek` are restricted to subcall context. They are no-ops when called directly.
 
 ## Workflow
 

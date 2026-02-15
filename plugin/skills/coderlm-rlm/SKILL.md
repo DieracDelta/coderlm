@@ -94,7 +94,7 @@ Check: `python3 $CLI check-final`. If `is_set: true`, present to user. Otherwise
 
 - **NEVER read source content into the conversation.** No `buffer-peek`, no `peek --full`, no `impl --full`, no `Read` on source files. Every byte of content in the conversation persists in history and compounds token cost on every subsequent turn.
 - **ALL content analysis goes through subagents.** Use `subcall-batch` (preferred for file-wide analysis) or `llm_query` (for targeted chunks). Subagents read content server-side via haiku — the root LLM never sees the source.
-- Scout commands (`structure`, `search`, `grep`, `symbols`, `impl`, `peek`, `callers`, `tests`) return metadata only (names, line numbers, byte sizes, buffer references). Use them freely for navigation.
+- Scout commands (`structure`, `search`, `grep`, `symbols`, `impl`, `peek`, `callers`, `tests`) return metadata only (names, line numbers, byte sizes, buffer references). Use them freely for navigation. List results are capped (search: 5, symbols: 10, callers/tests/grep: 5) — check `"truncated"` and `"total_count"` fields.
 - Subcalls can recurse up to `CODERLM_MAX_DEPTH` (default 3). If a subcall needs to understand code outside its chunk, it will automatically spawn deeper subcalls. Set the `CODERLM_MAX_DEPTH` env var to control recursion depth.
 - Prefer `subcall-batch` over individual `llm_query` — it handles chunking and parallelism automatically.
 - Max 3 loop iterations before synthesizing with available findings.
