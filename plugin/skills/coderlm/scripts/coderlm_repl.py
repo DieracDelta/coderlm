@@ -554,15 +554,25 @@ def run_exec(code: str, full_output: bool = False) -> dict:
         new_pkl.setdefault("_named_results", pkl["_named_results"])
     _save_pickle(new_pkl)
 
-    metadata = {
-        "stdout_lines": stdout_str.count("\n") + (1 if stdout_str and not stdout_str.endswith("\n") else 0),
-        "stdout_preview": stdout_str[:200] + ("..." if len(stdout_str) > 200 else ""),
-        "stdout_size": len(stdout_str),
-    }
+    # Build compact result — omit empty fields, inline small outputs
+    result: dict = {}
 
-    result: dict = {"metadata": metadata, "stderr": stderr_str, "error": error}
     if full_output:
         result["stdout"] = stdout_str
+    elif len(stdout_str) <= 200:
+        # Small enough to include directly — no metadata wrapper needed
+        result["stdout"] = stdout_str
+    else:
+        # Truncated — include size so caller knows there's more
+        result["stdout"] = stdout_str[:200] + "..."
+        result["stdout_size"] = len(stdout_str)
+
+    # Only include error/stderr when non-empty
+    if error:
+        result["error"] = error
+    if stderr_str and stderr_str != (error or ""):
+        result["stderr"] = stderr_str
+
     return result
 
 
