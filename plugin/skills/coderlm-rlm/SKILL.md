@@ -92,8 +92,10 @@ Check: `python3 $CLI check-final`. If `is_set: true`, present to user. Otherwise
 
 ## Rules
 
-- Never paste large buffers into conversation. Use `buffer-peek` for slices, `llm_query` for analysis.
-- `buffer-list` and `var-list` return summaries. Plan from metadata.
+- **NEVER call `buffer-peek` on buffers > 500 bytes.** That dumps content into the conversation, defeating meta-mode.
+- To read small content (config, short docs): use `peek --full` or `impl --full` directly.
+- To analyze large code/files: use `subcall-batch` or `llm_query` — they read buffers server-side via haiku, keeping content out of the conversation.
+- Never do the two-step anti-pattern: `peek` (meta) → `buffer-peek` (full dump). Either use `--full` or delegate to a subcall.
 - Prefer `subcall-batch` over individual `llm_query` for file-wide analysis.
 - Max 3 loop iterations before synthesizing with available findings.
 - If subcall fails, skip and continue. If server disconnects, re-run `init`.
