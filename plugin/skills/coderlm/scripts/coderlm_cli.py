@@ -720,8 +720,39 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
 # ── Parser ────────────────────────────────────────────────────────────
 
 
+class _BriefParser(argparse.ArgumentParser):
+    """ArgumentParser that shows concise errors with subcommand-specific help."""
+
+    def error(self, message: str) -> None:
+        # Try to find which subcommand was invoked so we can show its help
+        for i, arg in enumerate(sys.argv[1:], 1):
+            if not arg.startswith("-"):
+                # Found the subcommand — show its flags
+                sub_actions = self._subparsers._group_actions  # type: ignore[union-attr]
+                for action in sub_actions:
+                    if hasattr(action, "_parser_class"):
+                        choices = action.choices or {}
+                        if arg in choices:
+                            sub_parser = choices[arg]
+                            flags = []
+                            for a in sub_parser._actions:
+                                if a.option_strings:
+                                    flags.append(
+                                        f"  {', '.join(a.option_strings)}: {a.help or ''}"
+                                    )
+                            hint = "\n".join(flags) if flags else "  (no flags)"
+                            self.exit(
+                                2,
+                                f"error: {message}\n\n"
+                                f"'{arg}' accepts these flags:\n{hint}\n",
+                            )
+                break
+        # Fallback: just show the error without the giant subcommand list
+        self.exit(2, f"error: {message}\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = _BriefParser(
         prog="coderlm_cli",
         description="CLI wrapper for coderlm-server API",
     )
@@ -730,7 +761,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # init
     p_init = sub.add_parser("init", help="Create a session for the current project")
-    p_init.add_argument("--cwd", help="Project directory (default: $PWD)")
+    p_init.add_argument("--cwd", "--project", "--dir", "--path",
+                         dest="cwd", help="Project directory (default: $PWD)")
     p_init.add_argument("--host", default=None, help="Server host (default: 127.0.0.1)")
     p_init.add_argument("--port", type=int, default=None, help="Server port (default: $CODERLM_PORT or 3002)")
     p_init.set_defaults(func=cmd_init)
