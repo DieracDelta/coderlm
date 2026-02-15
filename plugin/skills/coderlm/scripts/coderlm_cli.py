@@ -613,7 +613,7 @@ def cmd_subcall_batch(args: argparse.Namespace) -> None:
             f"print(json.dumps(result, indent=2))"
         )
         proc = subprocess.run(
-            [sys.executable, str(repl_script), "exec", "--code", code],
+            [sys.executable, str(repl_script), "exec", "--full-output", "--code", code],
             capture_output=True,
             text=True,
             timeout=180,
