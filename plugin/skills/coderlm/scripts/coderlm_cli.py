@@ -807,9 +807,10 @@ def cmd_deep_query(args: argparse.Namespace) -> None:
     # Load deep-query agent prompt
     system_prompt = _load_agent_system_prompt("coderlm-deep-query")
 
-    # Build user prompt
-    cli_path = ".claude/coderlm_state/coderlm_cli.py"
-    user_prompt = f"Query: {args.query}\nCLI: {cli_path}"
+    # Build user prompt with ABSOLUTE paths so haiku doesn't try to find them
+    project_cwd = state.get("cwd", os.getcwd())
+    cli_path = os.path.join(project_cwd, ".claude/coderlm_state/coderlm_cli.py")
+    user_prompt = f"Query: {args.query}\nCLI: {cli_path}\nCWD: {project_cwd}"
 
     # Spawn haiku with full REPL access
     env = {
