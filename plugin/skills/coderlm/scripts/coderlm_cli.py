@@ -391,6 +391,8 @@ def cmd_grep(args: argparse.Namespace) -> None:
 
 
 def cmd_chunks(args: argparse.Namespace) -> None:
+    if _require_repl("chunks", "print(search('main'))"):
+        return
     state = _load_state()
     params = {"file": args.file}
     if args.size is not None:
@@ -583,6 +585,8 @@ def cmd_check_final(args: argparse.Namespace) -> None:
 
 
 def cmd_semantic_chunks(args: argparse.Namespace) -> None:
+    if _require_repl("semantic-chunks", "Use subcall-batch instead"):
+        return
     state = _load_state()
     params = {"file": args.file}
     if args.max_chunk_bytes is not None:
