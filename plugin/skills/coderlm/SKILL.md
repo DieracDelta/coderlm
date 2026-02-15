@@ -31,12 +31,12 @@ python3 $CLI structure [--depth N] [--full]
 python3 $CLI search QUERY [--limit N]
 python3 $CLI symbols [--file FILE] [--kind KIND] [--limit N]
 
-# Retrieve (metadata-only by default; --full for inline source)
-python3 $CLI impl SYMBOL --file FILE [--full]
-python3 $CLI callers SYMBOL --file FILE [--limit N] [--full]
-python3 $CLI tests SYMBOL --file FILE [--limit N] [--full]
-python3 $CLI peek FILE [--start N] [--end N] [--full]
-python3 $CLI grep PATTERN [--max-matches N] [--context-lines N] [--scope all|code] [--full]
+# Retrieve (metadata-only; content stays server-side)
+python3 $CLI impl SYMBOL --file FILE
+python3 $CLI callers SYMBOL --file FILE [--limit N]
+python3 $CLI tests SYMBOL --file FILE [--limit N]
+python3 $CLI peek FILE [--start N] [--end N]
+python3 $CLI grep PATTERN [--max-matches N] [--context-lines N] [--scope all|code]
 python3 $CLI variables FUNCTION --file FILE
 
 # Annotations
@@ -47,7 +47,6 @@ python3 $CLI load-annotations
 
 # Buffers & Variables (server-side state)
 python3 $CLI buffer-list
-python3 $CLI buffer-peek NAME [--start N] [--end N]
 python3 $CLI buffer-from-file NAME FILE [--start N] [--end N]
 python3 $CLI buffer-from-symbol NAME SYMBOL --file FILE
 python3 $CLI var-set NAME 'json_value'
@@ -59,23 +58,24 @@ python3 $CLI subcall-batch FILE "question" [--max-chunk-bytes 5000]
 python3 $CLI repl --code "print(search('auth'))"
 ```
 
-## Meta-mode (default)
+## Meta-mode (enforced)
 
-`structure`, `impl`, `callers`, `tests`, `peek`, `grep` return **metadata + buffer name** by default.
-Full content is auto-stored server-side. Use `buffer-peek` to read slices.
+`structure`, `impl`, `callers`, `tests`, `peek`, `grep` return **metadata + buffer name** only.
+Full content is auto-stored server-side in buffers. To analyze content, use `subcall-batch` or `/coderlm-rlm`.
 
-- `--full`: returns inline content (old behavior). Use for small functions (<10 lines).
-- Without `--full`: returns `{symbol, file, lines, bytes, preview, buffer}`. No source in conversation.
+- Returns `{symbol, file, lines, bytes, preview, buffer}`. No source enters the conversation.
+- `--full` flag exists but is restricted to subcall context (haiku subagents). It is a no-op when called directly.
 
 ## Workflow
 
 1. `init` — create session, index project
 2. `structure` / `search` / `grep` — find the entrypoint
-3. `impl` — read the function (metadata by default, `--full` for small ones)
+3. `impl` — locate the function (returns metadata: file, lines, bytes, buffer name)
 4. `callers` — trace what calls it, `impl` on those callers
 5. `tests` — find test coverage
 6. Repeat 3–5 until the execution path is clear
-7. `define-symbol` / `define-file` — annotate as understanding solidifies
+7. For deep analysis of content, use `subcall-batch` or `/coderlm-rlm`
+8. `define-symbol` / `define-file` — annotate as understanding solidifies
 
 ## Inputs
 
