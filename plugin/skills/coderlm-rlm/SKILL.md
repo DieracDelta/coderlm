@@ -97,5 +97,6 @@ Check: `python3 $CLI check-final`. If `is_set: true`, present to user. Otherwise
 - To analyze large code/files: use `subcall-batch` or `llm_query` — they read buffers server-side via haiku, keeping content out of the conversation.
 - Never do the two-step anti-pattern: `peek` (meta) → `buffer-peek` (full dump). Either use `--full` or delegate to a subcall.
 - Prefer `subcall-batch` over individual `llm_query` for file-wide analysis.
+- Subcalls can recurse up to `CODERLM_MAX_DEPTH` (default 3). If a subcall needs to understand code outside its chunk, it will automatically spawn deeper subcalls. Set the `CODERLM_MAX_DEPTH` env var to control recursion depth.
 - Max 3 loop iterations before synthesizing with available findings.
 - If subcall fails, skip and continue. If server disconnects, re-run `init`.

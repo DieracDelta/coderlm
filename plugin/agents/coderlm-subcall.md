@@ -45,6 +45,27 @@ Return **only** valid JSON with this schema:
 }
 ```
 
+## Recursive Subcalls
+
+If answering the query requires understanding code **not in the provided context** (e.g. a function defined in another file that is called in this chunk), you can spawn a recursive subcall via the REPL:
+
+```bash
+python3 .claude/coderlm_state/coderlm_cli.py repl --full-output --code "
+result = llm_query('What does function_name do?', context=peek_file('src/other.rs', 0, 100), chunk_id='sub_1')
+print(json.dumps(result, indent=2))
+"
+```
+
+You can also use `impl_()` or `peek()` to fetch specific symbol implementations or buffer content as context for the subcall.
+
+**When to recurse:**
+- Only when the current chunk references symbols/functions defined elsewhere that are essential to answering the query
+- Do NOT recurse speculatively or for "nice to have" context
+
+**Depth limits:**
+- Recursion is capped by `CODERLM_MAX_DEPTH` (default 3). If the limit is reached, `llm_query()` returns `{"error": "max recursion depth reached", ...}` instead of spawning
+- If recursion fails (depth limit or error), include what you know from the current chunk and note what you couldn't resolve
+
 ## Rules
 - Do NOT speculate beyond what is in the chunk
 - Keep evidence short (under 25 words per evidence field)

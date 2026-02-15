@@ -314,6 +314,10 @@ def _load_agent_system_prompt() -> str:
 def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
     """Delegate a question to a sub-LM via the coderlm-subcall agent.
 
+    Supports recursive subcalls: the haiku subagent can itself call llm_query()
+    via the REPL. Depth is tracked via the CODERLM_DEPTH env var and capped at
+    CODERLM_MAX_DEPTH (default 3).
+
     Args:
         prompt: The question to answer about the context.
         context: Text to analyze (inline). If empty, prompt should reference
@@ -321,10 +325,35 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
         chunk_id: Identifier for tracking this subcall's result.
 
     Returns:
-        Parsed JSON result dict with findings, suggested_queries, etc.
+        Parsed JSON result dict with findings, suggested_queries, depth, etc.
     """
     import shutil
     import subprocess
+
+    # ── Depth tracking ────────────────────────────────────────────────
+    depth = int(os.environ.get("CODERLM_DEPTH", "0"))
+    max_depth = int(os.environ.get("CODERLM_MAX_DEPTH", "3"))
+
+    if depth >= max_depth:
+        error_result = {
+            "chunk_id": chunk_id or "unknown",
+            "findings": [],
+            "suggested_queries": [],
+            "answer_if_complete": None,
+            "error": f"max recursion depth reached (depth={depth}, max={max_depth})",
+            "depth": depth,
+        }
+        # Store on server so the caller can see the depth-limit hit
+        _post(_STATE, "/subcall_results", {
+            "chunk_id": error_result["chunk_id"],
+            "query": prompt,
+            "findings": [],
+            "suggested_queries": [],
+            "answer_if_complete": None,
+            "error": error_result["error"],
+            "depth": depth,
+        })
+        return error_result
 
     claude_bin = shutil.which("claude")
     if not claude_bin:
@@ -339,9 +368,13 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
     if context:
         user_prompt += f"\n--- CONTEXT ---\n{context}\n--- END CONTEXT ---\n"
 
-    # Set CODERLM_SUBCALL=1 so the Stop hook skips cleanup
-    # (prevents haiku subprocess from deleting the parent session)
-    env = {**os.environ, "CODERLM_SUBCALL": "1"}
+    # Propagate env: CODERLM_SUBCALL=1 so Stop hook skips cleanup,
+    # CODERLM_DEPTH incremented so child knows its recursion level.
+    env = {
+        **os.environ,
+        "CODERLM_SUBCALL": "1",
+        "CODERLM_DEPTH": str(depth + 1),
+    }
 
     result = subprocess.run(
         [
@@ -388,6 +421,9 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
                 "answer_if_complete": None,
             }
 
+    # Annotate result with depth
+    parsed["depth"] = depth
+
     # Store result on the server
     if not parsed.get("chunk_id"):
         parsed["chunk_id"] = chunk_id or "unknown"
@@ -397,6 +433,7 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
         "findings": parsed.get("findings", parsed.get("relevant", [])),
         "suggested_queries": parsed.get("suggested_queries", parsed.get("suggested_next_queries", [])),
         "answer_if_complete": parsed.get("answer_if_complete"),
+        "depth": depth,
     })
 
     # Also store as a buffer for later reference
