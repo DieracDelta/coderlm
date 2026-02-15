@@ -282,6 +282,7 @@ async fn list_sessions(State(state): State<AppState>) -> Json<Value> {
 #[derive(Deserialize)]
 struct StructureQuery {
     depth: Option<usize>,
+    meta: Option<bool>,
 }
 
 async fn get_structure(
@@ -294,7 +295,19 @@ async fn get_structure(
     let result = structure::get_structure(&project.file_tree, depth);
     let preview = format!("{} files", result.file_count);
     record_history(&state, session_id(&headers).as_deref(), "GET", "/structure", &preview);
-    Ok(Json(serde_json::to_value(result).unwrap()))
+
+    if params.meta.unwrap_or(false) {
+        let repl = require_repl(&state, &headers)?;
+        let buffer_name = format!("structure::depth-{}", depth);
+        repl::buffer_create(&repl, &buffer_name, result.tree.clone(), "file tree structure");
+        Ok(Json(json!({
+            "file_count": result.file_count,
+            "language_breakdown": result.language_breakdown,
+            "buffer": buffer_name,
+        })))
+    } else {
+        Ok(Json(serde_json::to_value(result).unwrap()))
+    }
 }
 
 #[derive(Deserialize)]

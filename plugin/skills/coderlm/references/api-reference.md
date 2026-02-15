@@ -96,8 +96,13 @@ python3 cli history [--limit 50]
 
 ## Meta-mode Responses (default)
 
-By default, `impl`, `callers`, `tests`, `peek`, and `grep` return metadata-only.
+By default, `structure`, `impl`, `callers`, `tests`, `peek`, and `grep` return metadata-only.
 Full content is auto-stored in a server-side buffer. Pass `--full` for inline content.
+
+### structure (meta)
+```json
+{"file_count": 42, "language_breakdown": [{"language": "rust", "count": 38}], "buffer": "structure::depth-2"}
+```
 
 ### impl (meta)
 ```json
@@ -259,6 +264,9 @@ Same shape as symbols response.
 | TypeScript | `.ts`, `.tsx`                 |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` |
 | Go         | `.go`                         |
+| Lean       | `.lean`                       |
+| Markdown   | `.md`, `.mdx`                 |
+| PDF        | `.pdf` (converted via pymupdf4llm) |
 
 All other file types appear in the file tree and are searchable via peek/grep, but do not produce symbols.
 

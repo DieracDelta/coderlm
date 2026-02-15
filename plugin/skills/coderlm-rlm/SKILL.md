@@ -30,7 +30,7 @@ python3 $CLI var-set status '"scouting"'
 All commands return metadata-only — no source enters the conversation.
 
 ```bash
-python3 $CLI structure --depth 2
+python3 $CLI structure --depth 2   # meta-only: {file_count, language_breakdown, buffer}
 python3 $CLI search <key_terms>
 python3 $CLI grep <patterns> --scope code
 python3 $CLI impl <symbol> --file <file>

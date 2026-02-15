@@ -2,6 +2,12 @@
 # plugin/scripts/session-stop.sh
 # Save annotations and clean up coderlm session on Stop.
 # Called by the Stop hook — must never block or fail loudly.
+# Skipped when CODERLM_SUBCALL=1 (set by llm_query to prevent
+# haiku subprocesses from cleaning up the parent session).
+
+if [ "${CODERLM_SUBCALL:-0}" = "1" ]; then
+    exit 0
+fi
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CLI="$PLUGIN_ROOT/skills/coderlm/scripts/coderlm_cli.py"

@@ -257,6 +257,8 @@ def cmd_structure(args: argparse.Namespace) -> None:
     params = {}
     if args.depth is not None:
         params["depth"] = args.depth
+    if not args.full:
+        params["meta"] = "true"
     _output(_get(state, "/structure", params))
 
 
@@ -687,6 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
     # structure
     p_struct = sub.add_parser("structure", help="Get project file tree")
     p_struct.add_argument("--depth", type=int, default=None, help="Tree depth (0=unlimited)")
+    p_struct.add_argument("--full", action="store_true", help="Return full tree instead of metadata-only")
     p_struct.set_defaults(func=cmd_structure)
 
     # symbols

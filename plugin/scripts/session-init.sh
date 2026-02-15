@@ -1,6 +1,12 @@
 #!/bin/bash
 # Set up coderlm CLI symlink and optionally auto-create session.
 # Always exits 0 to never block session start.
+# Skipped when CODERLM_SUBCALL=1 (haiku subprocesses should not
+# re-init or overwrite the parent session).
+
+if [ "${CODERLM_SUBCALL:-0}" = "1" ]; then
+    exit 0
+fi
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CLI="$PLUGIN_ROOT/skills/coderlm/scripts/coderlm_cli.py"

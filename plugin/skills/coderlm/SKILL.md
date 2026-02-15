@@ -1,6 +1,6 @@
 ---
 name: coderlm
-description: "Primary tool for all code navigation and reading in supported languages (Rust, Python, TypeScript, JavaScript, Go). Use instead of Read, Grep, and Glob for finding symbols, reading function implementations, tracing callers, discovering tests, and understanding execution paths. Provides tree-sitter-backed indexing that returns exact source code — full function bodies, call sites with line numbers, test locations — without loading entire files into context. Use for: finding functions by name or pattern, reading specific implementations, answering 'what calls X', 'where does this error come from', 'how does X work', tracing from entrypoint to outcome, and any codebase exploration. Use Read only for config files, markdown, and unsupported languages."
+description: "Primary tool for all code navigation and reading in supported languages (Rust, Python, TypeScript, JavaScript, Go, Lean, Markdown). Use instead of Read, Grep, and Glob for finding symbols, reading function implementations, tracing callers, discovering tests, and understanding execution paths. Provides tree-sitter-backed indexing that returns exact source code — full function bodies, call sites with line numbers, test locations — without loading entire files into context. Use for: finding functions by name or pattern, reading specific implementations, answering 'what calls X', 'where does this error come from', 'how does X work', tracing from entrypoint to outcome, and any codebase exploration. Use Read only for config files and unsupported languages."
 allowed-tools:
   - Bash
   - Read
@@ -27,7 +27,7 @@ python3 $CLI status
 python3 $CLI cleanup
 
 # Explore
-python3 $CLI structure [--depth N]
+python3 $CLI structure [--depth N] [--full]
 python3 $CLI search QUERY [--limit N]
 python3 $CLI symbols [--file FILE] [--kind KIND] [--limit N]
 
@@ -61,7 +61,7 @@ python3 $CLI repl --code "print(search('auth'))"
 
 ## Meta-mode (default)
 
-`impl`, `callers`, `tests`, `peek`, `grep` return **metadata + buffer name** by default.
+`structure`, `impl`, `callers`, `tests`, `peek`, `grep` return **metadata + buffer name** by default.
 Full content is auto-stored server-side. Use `buffer-peek` to read slices.
 
 - `--full`: returns inline content (old behavior). Use for small functions (<10 lines).

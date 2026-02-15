@@ -292,6 +292,25 @@ def clear_subcall_results() -> None:
     _delete(_STATE, "/subcall_results")
 
 
+def _load_agent_system_prompt() -> str:
+    """Load the coderlm-subcall agent instructions for use as a system prompt."""
+    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / "coderlm-subcall.md"
+    if not agent_file.exists():
+        agent_file = Path(".claude/agents/coderlm-subcall.md")
+    if not agent_file.exists():
+        raise RuntimeError(
+            f"coderlm-subcall agent not found. Expected at: {agent_file}\n"
+            "Copy plugin/agents/coderlm-subcall.md to .claude/agents/"
+        )
+    text = agent_file.read_text()
+    # Strip YAML frontmatter
+    if text.startswith("---"):
+        end = text.find("---", 3)
+        if end != -1:
+            text = text[end + 3:].strip()
+    return text
+
+
 def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
     """Delegate a question to a sub-LM via the coderlm-subcall agent.
 
@@ -306,57 +325,45 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
     """
     import shutil
     import subprocess
-    import tempfile
 
     claude_bin = shutil.which("claude")
     if not claude_bin:
         raise RuntimeError("'claude' CLI not found on PATH. Install Claude Code to use llm_query().")
 
-    # Build the agent file path (relative to plugin root)
-    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / "coderlm-subcall.md"
-    if not agent_file.exists():
-        # Try project-level .claude/agents/
-        agent_file = Path(".claude/agents/coderlm-subcall.md")
-    if not agent_file.exists():
-        raise RuntimeError(
-            f"coderlm-subcall agent not found. Expected at: {agent_file}\n"
-            "Copy plugin/agents/coderlm-subcall.md to .claude/agents/"
-        )
+    system_prompt = _load_agent_system_prompt()
 
-    # Build the prompt for the subagent
-    full_prompt = f"Query: {prompt}\n"
+    # Build the user prompt for the subagent
+    user_prompt = f"Query: {prompt}\n"
     if chunk_id:
-        full_prompt += f"Chunk ID: {chunk_id}\n"
+        user_prompt += f"Chunk ID: {chunk_id}\n"
     if context:
-        full_prompt += f"\n--- CONTEXT ---\n{context}\n--- END CONTEXT ---\n"
+        user_prompt += f"\n--- CONTEXT ---\n{context}\n--- END CONTEXT ---\n"
 
-    # Write prompt to temp file for large contexts
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(full_prompt)
-        prompt_file = f.name
+    # Set CODERLM_SUBCALL=1 so the Stop hook skips cleanup
+    # (prevents haiku subprocess from deleting the parent session)
+    env = {**os.environ, "CODERLM_SUBCALL": "1"}
 
-    try:
-        result = subprocess.run(
-            [
-                claude_bin,
-                "--print",
-                "--output-format", "text",
-                "--agent-file", str(agent_file),
-                "--prompt", full_prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    finally:
-        os.unlink(prompt_file)
+    result = subprocess.run(
+        [
+            claude_bin,
+            "-p",
+            "--model", "haiku",
+            "--output-format", "text",
+            "--no-session-persistence",
+            "--system-prompt", system_prompt,
+            user_prompt,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
 
     if result.returncode != 0:
         raise RuntimeError(f"Subagent failed (exit {result.returncode}): {result.stderr[:500]}")
 
     # Parse the JSON response
     output = result.stdout.strip()
-    # Try to extract JSON from the output (subagent might include extra text)
     try:
         parsed = json.loads(output)
     except json.JSONDecodeError:
