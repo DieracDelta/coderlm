@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'NEVER use Read/Glob/Grep on code files (.rs .py .ts .js .go .lean). Use coderlm: deep-query for exploration, subcall-batch for known files, REPL for metadata. Read is ONLY for config/markdown. Wait for deep-query results before proceeding.'",
+            "command": "echo 'NEVER use Read/Glob/Grep on code files (.rs .py .ts .js .go .lean) or indexed PDFs. Use coderlm: deep-query for exploration, subcall-batch for known files, REPL for metadata. Read is ONLY for config/markdown. Wait for deep-query results before proceeding.'",
             "timeout": 5000
           }
         ]

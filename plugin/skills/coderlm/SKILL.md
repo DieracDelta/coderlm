@@ -1,6 +1,6 @@
 ---
 name: coderlm
-description: "Recursive Language Model (RLM) for codebase exploration and deep analysis. Use for ALL code navigation in supported languages (Rust, Python, TypeScript, JavaScript, Go, Lean). Delegates exploration to haiku sub-LMs via deep-query — the root never runs REPL loops. Use Read only for config files, markdown, and unsupported languages."
+description: "Recursive Language Model (RLM) for codebase exploration and deep analysis. Use for ALL code navigation in supported languages (Rust, Python, TypeScript, JavaScript, Go, Lean) and indexed PDFs. Delegates exploration to haiku sub-LMs via deep-query — the root never runs REPL loops. Use Read only for config files, markdown, and unsupported languages."
 allowed-tools:
   - Bash
   - Read
