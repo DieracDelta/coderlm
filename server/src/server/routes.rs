@@ -439,6 +439,7 @@ async fn redefine_symbol(
 struct ImplementationQuery {
     symbol: String,
     file: String,
+    meta: Option<bool>,
 }
 
 async fn get_implementation(
@@ -456,11 +457,40 @@ async fn get_implementation(
     .map_err(AppError::NotFound)?;
     let preview = format!("{}::{} ({} bytes)", params.file, params.symbol, source.len());
     record_history(&state, session_id(&headers).as_deref(), "GET", "/symbols/implementation", &preview);
-    Ok(Json(json!({
-        "symbol": params.symbol,
-        "file": params.file,
-        "source": source,
-    })))
+
+    if params.meta.unwrap_or(false) {
+        let repl = require_repl(&state, &headers)?;
+        let buffer_name = format!("impl::{}::{}", params.file, params.symbol);
+
+        // Look up symbol for line range info
+        let sym = project.symbol_table.get(&params.file, &params.symbol)
+            .ok_or_else(|| AppError::NotFound(format!("Symbol '{}' not found in '{}'", params.symbol, params.file)))?;
+
+        // Auto-create buffer with full source
+        repl::buffer_create(&repl, &buffer_name, source.clone(),
+            &format!("impl of {} in {}", params.symbol, params.file));
+
+        let meta_preview = if source.len() > 100 {
+            format!("{}...", &source[..source.floor_char_boundary(100)])
+        } else {
+            source.clone()
+        };
+
+        Ok(Json(json!({
+            "symbol": params.symbol,
+            "file": params.file,
+            "lines": [sym.line_range.0, sym.line_range.1],
+            "bytes": source.len(),
+            "preview": meta_preview,
+            "buffer": buffer_name,
+        })))
+    } else {
+        Ok(Json(json!({
+            "symbol": params.symbol,
+            "file": params.file,
+            "source": source,
+        })))
+    }
 }
 
 #[derive(Deserialize)]
@@ -468,6 +498,7 @@ struct TestsQuery {
     symbol: String,
     file: String,
     limit: Option<usize>,
+    meta: Option<bool>,
 }
 
 async fn find_tests(
@@ -488,7 +519,31 @@ async fn find_tests(
     .map_err(AppError::NotFound)?;
     let preview = format!("{} tests for {}", tests.len(), params.symbol);
     record_history(&state, session_id(&headers).as_deref(), "GET", "/symbols/tests", &preview);
-    Ok(Json(json!({ "tests": tests, "count": tests.len() })))
+
+    if params.meta.unwrap_or(false) {
+        let repl = require_repl(&state, &headers)?;
+        let buffer_name = format!("tests::{}::{}", params.file, params.symbol);
+
+        // Store full results in buffer
+        let full_json = serde_json::to_string_pretty(&tests).unwrap_or_default();
+        repl::buffer_create(&repl, &buffer_name, full_json,
+            &format!("tests for {} in {}", params.symbol, params.file));
+
+        // Return metadata-only (no signature)
+        let meta_tests: Vec<Value> = tests.iter().map(|t| json!({
+            "name": t.name,
+            "file": t.file,
+            "line": t.line,
+        })).collect();
+
+        Ok(Json(json!({
+            "tests": meta_tests,
+            "count": tests.len(),
+            "buffer": buffer_name,
+        })))
+    } else {
+        Ok(Json(json!({ "tests": tests, "count": tests.len() })))
+    }
 }
 
 #[derive(Deserialize)]
@@ -496,6 +551,7 @@ struct CallersQuery {
     symbol: String,
     file: String,
     limit: Option<usize>,
+    meta: Option<bool>,
 }
 
 async fn find_callers(
@@ -516,7 +572,30 @@ async fn find_callers(
     .map_err(AppError::NotFound)?;
     let preview = format!("{} callers of {}", callers.len(), params.symbol);
     record_history(&state, session_id(&headers).as_deref(), "GET", "/symbols/callers", &preview);
-    Ok(Json(json!({ "callers": callers, "count": callers.len() })))
+
+    if params.meta.unwrap_or(false) {
+        let repl = require_repl(&state, &headers)?;
+        let buffer_name = format!("callers::{}::{}", params.file, params.symbol);
+
+        // Store full results in buffer
+        let full_json = serde_json::to_string_pretty(&callers).unwrap_or_default();
+        repl::buffer_create(&repl, &buffer_name, full_json,
+            &format!("callers of {} in {}", params.symbol, params.file));
+
+        // Return metadata-only (no text)
+        let meta_callers: Vec<Value> = callers.iter().map(|c| json!({
+            "file": c.file,
+            "line": c.line,
+        })).collect();
+
+        Ok(Json(json!({
+            "callers": meta_callers,
+            "count": callers.len(),
+            "buffer": buffer_name,
+        })))
+    } else {
+        Ok(Json(json!({ "callers": callers, "count": callers.len() })))
+    }
 }
 
 #[derive(Deserialize)]
@@ -552,6 +631,7 @@ struct PeekQuery {
     file: String,
     start: Option<usize>,
     end: Option<usize>,
+    meta: Option<bool>,
 }
 
 async fn peek(
@@ -572,7 +652,33 @@ async fn peek(
     .map_err(AppError::NotFound)?;
     let preview = format!("{}:{}-{}", params.file, start, end);
     record_history(&state, session_id(&headers).as_deref(), "GET", "/peek", &preview);
-    Ok(Json(serde_json::to_value(result).unwrap()))
+
+    if params.meta.unwrap_or(false) {
+        let repl = require_repl(&state, &headers)?;
+        let buffer_name = format!("peek::{}::{}-{}", params.file, result.start_line, result.end_line);
+
+        // Store full content in buffer
+        repl::buffer_create(&repl, &buffer_name, result.content.clone(),
+            &format!("peek {}:{}-{}", params.file, result.start_line, result.end_line));
+
+        let content_preview = if result.content.len() > 100 {
+            format!("{}...", &result.content[..result.content.floor_char_boundary(100)])
+        } else {
+            result.content.clone()
+        };
+
+        Ok(Json(json!({
+            "file": result.file,
+            "start": result.start_line,
+            "end": result.end_line,
+            "total_lines": result.total_lines,
+            "bytes": result.content.len(),
+            "preview": content_preview,
+            "buffer": buffer_name,
+        })))
+    } else {
+        Ok(Json(serde_json::to_value(result).unwrap()))
+    }
 }
 
 #[derive(Deserialize)]
@@ -582,6 +688,7 @@ struct GrepQuery {
     context_lines: Option<usize>,
     /// Optional scope filter: "all" (default) or "code" (skip comments/strings).
     scope: Option<String>,
+    meta: Option<bool>,
 }
 
 async fn grep_handler(
@@ -613,7 +720,32 @@ async fn grep_handler(
 
     let preview = format!("{} matches for '{}'", result.total_matches, params.pattern);
     record_history(&state, session_id(&headers).as_deref(), "GET", "/grep", &preview);
-    Ok(Json(serde_json::to_value(result).unwrap()))
+
+    if params.meta.unwrap_or(false) {
+        let repl = require_repl(&state, &headers)?;
+        let buffer_name = format!("grep::{}", params.pattern);
+
+        // Store full results in buffer
+        let full_json = serde_json::to_string_pretty(&result).unwrap_or_default();
+        repl::buffer_create(&repl, &buffer_name, full_json,
+            &format!("grep results for '{}'", params.pattern));
+
+        // Return metadata-only (no text/context)
+        let meta_matches: Vec<Value> = result.matches.iter().map(|m| json!({
+            "file": m.file,
+            "line": m.line,
+        })).collect();
+
+        Ok(Json(json!({
+            "pattern": result.pattern,
+            "matches": meta_matches,
+            "total_matches": result.total_matches,
+            "truncated": result.truncated,
+            "buffer": buffer_name,
+        })))
+    } else {
+        Ok(Json(serde_json::to_value(result).unwrap()))
+    }
 }
 
 #[derive(Deserialize)]

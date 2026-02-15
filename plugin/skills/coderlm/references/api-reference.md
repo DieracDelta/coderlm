@@ -94,7 +94,37 @@ python3 cli load-annotations
 python3 cli history [--limit 50]
 ```
 
-## Response Shapes
+## Meta-mode Responses (default)
+
+By default, `impl`, `callers`, `tests`, `peek`, and `grep` return metadata-only.
+Full content is auto-stored in a server-side buffer. Pass `--full` for inline content.
+
+### impl (meta)
+```json
+{"symbol": "foo", "file": "src/lib.rs", "lines": [10, 25], "bytes": 420, "preview": "pub fn foo(...", "buffer": "impl::src/lib.rs::foo"}
+```
+
+### callers (meta)
+```json
+{"callers": [{"file": "src/main.rs", "line": 95}], "count": 2, "buffer": "callers::src/lib.rs::foo"}
+```
+
+### tests (meta)
+```json
+{"tests": [{"name": "test_foo", "file": "tests/lib.rs", "line": 12}], "count": 1, "buffer": "tests::src/lib.rs::foo"}
+```
+
+### peek (meta)
+```json
+{"file": "src/main.rs", "start": 1, "end": 50, "total_lines": 143, "bytes": 1200, "preview": "mod config;...", "buffer": "peek::src/main.rs::1-50"}
+```
+
+### grep (meta)
+```json
+{"pattern": "DashMap", "matches": [{"file": "src/lib.rs", "line": 1}], "total_matches": 8, "truncated": false, "buffer": "grep::DashMap"}
+```
+
+## Full Response Shapes (`--full` flag)
 
 ### structure
 ```json

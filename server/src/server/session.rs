@@ -52,7 +52,8 @@ pub struct BufferInfo {
 impl BufferInfo {
     pub fn from_buffer(buf: &Buffer) -> Self {
         let preview = if buf.content.len() > 200 {
-            format!("{}...", &buf.content[..200])
+            let boundary = buf.content.floor_char_boundary(200);
+            format!("{}...", &buf.content[..boundary])
         } else {
             buf.content.clone()
         };
@@ -138,7 +139,8 @@ impl Session {
             method: method.to_string(),
             path: path.to_string(),
             response_preview: if response_preview.len() > 200 {
-                format!("{}...", &response_preview[..200])
+                let boundary = response_preview.floor_char_boundary(200);
+                format!("{}...", &response_preview[..boundary])
             } else {
                 response_preview.to_string()
             },

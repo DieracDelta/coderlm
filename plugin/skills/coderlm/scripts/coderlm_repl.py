@@ -2,11 +2,13 @@
 """RLM REPL environment for CodeRLM.
 
 Executes Python code with injected helpers that call the coderlm API.
-Durable state (buffers, variables) lives on the Rust server -- the Python
-namespace is ephemeral (only lasts for a single exec call).
+Durable state (buffers, variables) lives on the Rust server. Python namespace
+variables persist between invocations via pickle. Stdout is stored in pickle
+and only metadata is returned to the conversation.
 
 Usage:
   python3 coderlm_repl.py exec --code "print(search('auth'))"
+  python3 coderlm_repl.py exec --full-output --code "..."  # include full stdout
   python3 coderlm_repl.py exec < script.py
   python3 coderlm_repl.py state          # show buffer/var summary from server
   python3 coderlm_repl.py check-final    # check termination
@@ -18,6 +20,7 @@ import argparse
 import io
 import json
 import os
+import pickle
 import sys
 import traceback
 import urllib.error
@@ -112,6 +115,51 @@ def _delete(state: dict, path: str) -> dict:
 # These are injected into the exec namespace so user code can call them.
 
 _STATE: dict = {}  # loaded once at startup
+
+_PICKLE_PATH = _state_dir() / "repl_state.pkl"
+
+# Keys in the pickle that are internal (not user namespace variables)
+_INTERNAL_PICKLE_KEYS = {"_last_stdout", "_last_stderr", "_last_error", "_named_results"}
+
+
+def _load_pickle() -> dict:
+    """Load persisted REPL state from pickle file."""
+    if not _PICKLE_PATH.exists():
+        return {}
+    try:
+        with _PICKLE_PATH.open("rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return {}
+
+
+def _save_pickle(data: dict) -> None:
+    """Save REPL state to pickle file."""
+    _PICKLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _PICKLE_PATH.open("wb") as f:
+        pickle.dump(data, f)
+
+
+def last_output() -> str:
+    """Return full stdout from the last exec (from pickle state)."""
+    pkl = _load_pickle()
+    return pkl.get("_last_stdout", "")
+
+
+def get_result(name: str):
+    """Retrieve a named result from pickle state."""
+    pkl = _load_pickle()
+    results = pkl.get("_named_results", {})
+    return results.get(name)
+
+
+def save_result(name: str, value) -> None:
+    """Save a named result to pickle state."""
+    pkl = _load_pickle()
+    results = pkl.get("_named_results", {})
+    results[name] = value
+    pkl["_named_results"] = results
+    _save_pickle(pkl)
 
 
 def search(query: str, limit: int = 20) -> list[dict]:
@@ -356,9 +404,13 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
 
 # ── Exec engine ───────────────────────────────────────────────────────
 
-def _build_namespace() -> dict:
-    """Build the namespace dict with all injected helpers."""
-    return {
+def _build_namespace(persisted: dict | None = None) -> dict:
+    """Build the namespace dict with all injected helpers.
+
+    If *persisted* is provided, user-defined variables from the previous
+    invocation are restored into the namespace.
+    """
+    ns = {
         # Index queries
         "search": search,
         "impl_": impl_,
@@ -384,18 +436,36 @@ def _build_namespace() -> dict:
         "llm_query": llm_query,
         "subcall_results": subcall_results,
         "clear_subcall_results": clear_subcall_results,
+        # Pickle persistence helpers
+        "last_output": last_output,
+        "get_result": get_result,
+        "save_result": save_result,
         # Standard library conveniences
         "json": json,
     }
+    # Restore persisted user variables (don't overwrite builtins/helpers)
+    if persisted:
+        for k, v in persisted.items():
+            if k not in ns and k not in _INTERNAL_PICKLE_KEYS and not k.startswith("__"):
+                ns[k] = v
+    return ns
 
 
-def run_exec(code: str) -> dict:
-    """Execute code in the REPL namespace, capturing stdout/stderr."""
+def run_exec(code: str, full_output: bool = False) -> dict:
+    """Execute code in the REPL namespace, capturing stdout/stderr.
+
+    Namespace variables persist between invocations via pickle.  Full stdout
+    is stored in pickle as ``_last_stdout``; by default only metadata is
+    returned.  Pass *full_output=True* to include the complete stdout.
+    """
+    # Load persisted namespace
+    pkl = _load_pickle()
+
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
     error = None
 
-    namespace = _build_namespace()
+    namespace = _build_namespace(persisted=pkl)
 
     old_stdout, old_stderr = sys.stdout, sys.stderr
     try:
@@ -412,16 +482,41 @@ def run_exec(code: str) -> dict:
     stdout_str = stdout_buf.getvalue()
     stderr_str = stderr_buf.getvalue()
 
-    return {
-        "stdout": stdout_str,
-        "stderr": stderr_str,
-        "error": error,
-        "metadata": {
-            "stdout_lines": stdout_str.count("\n") + (1 if stdout_str and not stdout_str.endswith("\n") else 0),
-            "stdout_preview": stdout_str[:200] + ("..." if len(stdout_str) > 200 else ""),
-            "stdout_size": len(stdout_str),
-        },
+    # Extract user-defined variables to persist (skip builtins, modules,
+    # callables that are our injected helpers, and dunder names)
+    helpers = _build_namespace()  # fresh copy to know which keys are ours
+    new_pkl: dict = {}
+    for k, v in namespace.items():
+        if k.startswith("__"):
+            continue
+        if k in helpers:
+            continue
+        # Only persist serialisable values
+        try:
+            pickle.dumps(v)
+            new_pkl[k] = v
+        except Exception:
+            pass
+
+    # Store stdout/stderr in pickle for later retrieval
+    new_pkl["_last_stdout"] = stdout_str
+    new_pkl["_last_stderr"] = stderr_str
+    new_pkl["_last_error"] = error
+    # Preserve named results from previous invocations
+    if "_named_results" in pkl:
+        new_pkl.setdefault("_named_results", pkl["_named_results"])
+    _save_pickle(new_pkl)
+
+    metadata = {
+        "stdout_lines": stdout_str.count("\n") + (1 if stdout_str and not stdout_str.endswith("\n") else 0),
+        "stdout_preview": stdout_str[:200] + ("..." if len(stdout_str) > 200 else ""),
+        "stdout_size": len(stdout_str),
     }
+
+    result: dict = {"metadata": metadata, "stderr": stderr_str, "error": error}
+    if full_output:
+        result["stdout"] = stdout_str
+    return result
 
 
 # ── CLI commands ──────────────────────────────────────────────────────
@@ -438,7 +533,7 @@ def cmd_exec(args: argparse.Namespace) -> None:
     else:
         code = sys.stdin.read()
 
-    result = run_exec(code)
+    result = run_exec(code, full_output=args.full_output)
     print(json.dumps(result, indent=2))
 
 
@@ -474,6 +569,8 @@ def main() -> None:
 
     p_exec = sub.add_parser("exec", help="Execute Python code in the REPL environment")
     p_exec.add_argument("--code", help="Code to execute (reads stdin if omitted)")
+    p_exec.add_argument("--full-output", action="store_true",
+                        help="Include full stdout in response (default: metadata-only)")
     p_exec.set_defaults(func=cmd_exec)
 
     p_state = sub.add_parser("state", help="Show buffer/variable summary from server")

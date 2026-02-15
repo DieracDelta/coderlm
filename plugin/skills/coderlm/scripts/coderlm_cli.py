@@ -283,6 +283,8 @@ def cmd_search(args: argparse.Namespace) -> None:
 def cmd_impl(args: argparse.Namespace) -> None:
     state = _load_state()
     params = {"symbol": args.symbol, "file": args.file}
+    if not args.full:
+        params["meta"] = "true"
     _output(_get(state, "/symbols/implementation", params))
 
 
@@ -291,6 +293,8 @@ def cmd_callers(args: argparse.Namespace) -> None:
     params = {"symbol": args.symbol, "file": args.file}
     if args.limit is not None:
         params["limit"] = args.limit
+    if not args.full:
+        params["meta"] = "true"
     _output(_get(state, "/symbols/callers", params))
 
 
@@ -299,6 +303,8 @@ def cmd_tests(args: argparse.Namespace) -> None:
     params = {"symbol": args.symbol, "file": args.file}
     if args.limit is not None:
         params["limit"] = args.limit
+    if not args.full:
+        params["meta"] = "true"
     _output(_get(state, "/symbols/tests", params))
 
 
@@ -315,6 +321,8 @@ def cmd_peek(args: argparse.Namespace) -> None:
         params["start"] = args.start
     if args.end is not None:
         params["end"] = args.end
+    if not args.full:
+        params["meta"] = "true"
     _output(_get(state, "/peek", params))
 
 
@@ -327,6 +335,8 @@ def cmd_grep(args: argparse.Namespace) -> None:
         params["context_lines"] = args.context_lines
     if args.scope is not None:
         params["scope"] = args.scope
+    if not args.full:
+        params["meta"] = "true"
     _output(_get(state, "/grep", params))
 
 
@@ -696,6 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_impl = sub.add_parser("impl", help="Get full source of a symbol")
     p_impl.add_argument("symbol", help="Symbol name")
     p_impl.add_argument("--file", required=True, help="File containing the symbol")
+    p_impl.add_argument("--full", action="store_true", help="Return full source instead of metadata-only")
     p_impl.set_defaults(func=cmd_impl)
 
     # callers
@@ -703,6 +714,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_callers.add_argument("symbol", help="Symbol name")
     p_callers.add_argument("--file", required=True, help="File containing the symbol")
     p_callers.add_argument("--limit", type=int, default=None)
+    p_callers.add_argument("--full", action="store_true", help="Return full caller text instead of metadata-only")
     p_callers.set_defaults(func=cmd_callers)
 
     # tests
@@ -710,6 +722,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_tests.add_argument("symbol", help="Symbol name")
     p_tests.add_argument("--file", required=True, help="File containing the symbol")
     p_tests.add_argument("--limit", type=int, default=None)
+    p_tests.add_argument("--full", action="store_true", help="Return full test info instead of metadata-only")
     p_tests.set_defaults(func=cmd_tests)
 
     # variables
@@ -723,6 +736,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_peek.add_argument("file", help="File path")
     p_peek.add_argument("--start", type=int, default=None, help="Start line (0-indexed)")
     p_peek.add_argument("--end", type=int, default=None, help="End line (exclusive)")
+    p_peek.add_argument("--full", action="store_true", help="Return full content instead of metadata-only")
     p_peek.set_defaults(func=cmd_peek)
 
     # grep
@@ -732,6 +746,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_grep.add_argument("--context-lines", type=int, default=None)
     p_grep.add_argument("--scope", choices=["all", "code"], default=None,
                          help="Scope filter: 'all' (default) or 'code' (skip comments/strings)")
+    p_grep.add_argument("--full", action="store_true", help="Return full match text instead of metadata-only")
     p_grep.set_defaults(func=cmd_grep)
 
     # chunks

@@ -314,7 +314,8 @@ fn make_chunk(
     let line_end = source[..byte_end].lines().count();
     let slice = &source[byte_start..byte_end];
     let preview = if slice.len() > 200 {
-        format!("{}...", &slice[..200])
+        let trunc = slice.floor_char_boundary(200);
+        format!("{}...", &slice[..trunc])
     } else {
         slice.to_string()
     };
@@ -336,7 +337,7 @@ fn simple_chunks(source: &str, max_chunk_bytes: usize) -> Vec<SemanticChunk> {
     let mut index = 0;
 
     while start < source.len() {
-        let mut end = (start + max_chunk_bytes).min(source.len());
+        let mut end = source.floor_char_boundary((start + max_chunk_bytes).min(source.len()));
         // Try to break at a newline
         if end < source.len() {
             if let Some(nl) = source[start..end].rfind('\n') {
