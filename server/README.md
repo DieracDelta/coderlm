@@ -44,7 +44,7 @@ coderlm-server serve
 coderlm-server serve /path/to/your/project
 
 # Verify it's running
-curl http://127.0.0.1:3000/api/v1/health
+curl http://127.0.0.1:3001/api/v1/health
 ```
 
 Output:
@@ -61,7 +61,7 @@ Output:
 Create a session to start working with a project:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/api/v1/sessions \
+curl -X POST http://127.0.0.1:3001/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"cwd":"/path/to/your/project"}'
 ```
@@ -77,7 +77,7 @@ Arguments:
   [PATH]  Optional path to pre-index at startup
 
 Options:
-  -p, --port <PORT>                  Port to listen on [default: 3000]
+  -p, --port <PORT>                  Port to listen on [default: 3001]
   -b, --bind <ADDR>                  Bind address [default: 127.0.0.1]
       --max-file-size <BYTES>        Skip files larger than this [default: 1000000]
       --max-projects <N>             Maximum concurrent indexed projects [default: 5]
@@ -113,21 +113,21 @@ A single server instance supports multiple projects simultaneously. Projects are
 
 ```bash
 # Start the server
-coderlm-server serve --port 3000
+coderlm-server serve --port 3001
 
 # Agent A connects to the backend
-SESSION_A=$(curl -s -X POST localhost:3000/api/v1/sessions \
+SESSION_A=$(curl -s -X POST localhost:3001/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"cwd":"/home/user/backend"}' | jq -r .session_id)
 
 # Agent B connects to the frontend
-SESSION_B=$(curl -s -X POST localhost:3000/api/v1/sessions \
+SESSION_B=$(curl -s -X POST localhost:3001/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"cwd":"/home/user/frontend"}' | jq -r .session_id)
 
 # Each agent only sees its own project
-curl -H "X-Session-Id: $SESSION_A" localhost:3000/api/v1/structure  # backend files
-curl -H "X-Session-Id: $SESSION_B" localhost:3000/api/v1/structure  # frontend files
+curl -H "X-Session-Id: $SESSION_A" localhost:3001/api/v1/structure  # backend files
+curl -H "X-Session-Id: $SESSION_B" localhost:3001/api/v1/structure  # frontend files
 ```
 
 ### Capacity and LRU eviction
@@ -144,7 +144,7 @@ coderlm-server serve --max-projects 10
 Check which projects are currently indexed:
 
 ```bash
-curl localhost:3000/api/v1/roots
+curl localhost:3001/api/v1/roots
 ```
 
 Returns each project's path, file count, symbol count, last active time, and session count.
@@ -152,13 +152,13 @@ Returns each project's path, file count, symbol count, last active time, and ses
 List all active sessions:
 
 ```bash
-curl localhost:3000/api/v1/sessions
+curl localhost:3001/api/v1/sessions
 ```
 
 View command history across all sessions (no `X-Session-Id` needed):
 
 ```bash
-curl localhost:3000/api/v1/history
+curl localhost:3001/api/v1/history
 ```
 
 ### Recommendations

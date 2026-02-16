@@ -21,6 +21,8 @@ import io
 import json
 import os
 import pickle
+import shlex
+import subprocess
 import sys
 import traceback
 import urllib.error
@@ -37,7 +39,7 @@ def _resolve_instance() -> str | None:
     if inst:
         return inst
 
-    base = Path(".claude/coderlm_state/instances")
+    base = Path(".coderlm/codex_state/instances")
     if base.exists():
         pid = os.getpid()
         while pid > 1:
@@ -53,7 +55,7 @@ def _resolve_instance() -> str | None:
             except (OSError, ValueError, IndexError):
                 break
 
-    hint = Path(".claude/coderlm_state/active_instance")
+    hint = Path(".coderlm/codex_state/active_instance")
     if hint.exists():
         try:
             return hint.read_text().strip()
@@ -64,7 +66,7 @@ def _resolve_instance() -> str | None:
 
 
 def _state_dir() -> Path:
-    base = Path(".claude/coderlm_state")
+    base = Path(".coderlm/codex_state")
     inst = _resolve_instance()
     if inst:
         return base / "sessions" / inst
@@ -81,7 +83,7 @@ def _load_state() -> dict:
 
 def _base_url(state: dict) -> str:
     host = state.get("host", "127.0.0.1")
-    port = state.get("port", int(os.environ.get("CODERLM_PORT", 3002)))
+    port = state.get("port", int(os.environ.get("CODERLM_PORT", 3001)))
     return f"http://{host}:{port}/api/v1"
 
 
@@ -296,9 +298,9 @@ def list_vars() -> list[dict]:
 
 # ── RLM control ───────────────────────────────────────────────────────
 
-def set_final(result) -> None:
-    """Set the Final variable (Algorithm 1 termination)."""
-    set_var("Final", result)
+def set_final(result, key: str | None = None) -> None:
+    """Set the Final variable (Algorithm 1 termination), optionally scoped by key."""
+    set_var(key or "Final", result)
 
 
 def add_finding(text: str) -> None:
@@ -331,14 +333,16 @@ def _load_agent_system_prompt(agent_name: str = "coderlm-subcall") -> str:
         agent_name: Base name of the agent file (without .md extension).
                     Defaults to "coderlm-subcall".
     """
-    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / f"{agent_name}.md"
-    if not agent_file.exists():
-        agent_file = Path(f".claude/agents/{agent_name}.md")
-    if not agent_file.exists():
-        raise RuntimeError(
-            f"{agent_name} agent not found. Expected at: {agent_file}\n"
-            f"Copy plugin/agents/{agent_name}.md to .claude/agents/"
-        )
+    skill_dir = Path(__file__).resolve().parent.parent
+    candidates = [
+        skill_dir / "references" / f"{agent_name}.md",
+        Path(__file__).resolve().parent.parent.parent.parent / "agents" / f"{agent_name}.md",
+        Path(f".claude/agents/{agent_name}.md"),
+    ]
+    agent_file = next((p for p in candidates if p.exists()), None)
+    if agent_file is None:
+        searched = "\n".join(str(p) for p in candidates)
+        raise RuntimeError(f"{agent_name} agent not found. Searched:\n{searched}")
     text = agent_file.read_text()
     # Strip YAML frontmatter
     if text.startswith("---"):
@@ -351,9 +355,9 @@ def _load_agent_system_prompt(agent_name: str = "coderlm-subcall") -> str:
 def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
     """Delegate a question to a sub-LM via the coderlm-subcall agent.
 
-    Supports recursive subcalls: the haiku subagent can itself call llm_query()
+    Supports recursive subcalls: the codex subagent can itself call llm_query()
     via the REPL. Depth is tracked via the CODERLM_DEPTH env var and capped at
-    CODERLM_MAX_DEPTH (default 3).
+    CODERLM_MAX_DEPTH (default 2).
 
     Args:
         prompt: The question to answer about the context.
@@ -364,12 +368,9 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
     Returns:
         Parsed JSON result dict with findings, suggested_queries, depth, etc.
     """
-    import shutil
-    import subprocess
-
     # ── Depth tracking ────────────────────────────────────────────────
     depth = int(os.environ.get("CODERLM_DEPTH", "0"))
-    max_depth = int(os.environ.get("CODERLM_MAX_DEPTH", "3"))
+    max_depth = int(os.environ.get("CODERLM_MAX_DEPTH", "2"))
 
     if depth >= max_depth:
         error_result = {
@@ -392,11 +393,9 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
         })
         return error_result
 
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        raise RuntimeError("'claude' CLI not found on PATH. Install Claude Code to use llm_query().")
-
     system_prompt = _load_agent_system_prompt()
+    model = os.environ.get("CODERLM_SUBCALL_MODEL", "o4-mini")
+    extra_args = shlex.split(os.environ.get("CODERLM_SUBCALL_EXTRA_ARGS", ""))
 
     # Build the user prompt for the subagent
     user_prompt = f"Query: {prompt}\n"
@@ -413,22 +412,26 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
         "CODERLM_DEPTH": str(depth + 1),
     }
 
+    project_cwd = _STATE.get("project") or os.getcwd()
+    full_prompt = f"{system_prompt}\n\n---\nUSER TASK\n{user_prompt}\n"
     result = subprocess.run(
         [
-            claude_bin,
-            "-p",
-            "--model", "haiku",
-            "--output-format", "text",
-            "--no-session-persistence",
-            "--disable-slash-commands",
-            "--setting-sources", "",
-            "--tools", "Bash,Read",
-            "--system-prompt", system_prompt,
-            user_prompt,
+            "nix",
+            "run",
+            "github:sadjow/codex-nix",
+            "--",
+            "exec",
+            "-m",
+            model,
+            "--skip-git-repo-check",
+            "--cd",
+            project_cwd,
+            *extra_args,
+            full_prompt,
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=180,
         env=env,
     )
 

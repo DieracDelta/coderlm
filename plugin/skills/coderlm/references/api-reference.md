@@ -5,14 +5,14 @@ The CLI wrapper (`coderlm_cli.py`) handles headers and session management automa
 
 ## CLI Command Reference
 
-All commands below assume the CLI is at `.claude/coderlm_state/coderlm_cli.py`.
+All commands below assume the CLI is at `.coderlm/codex_state/coderlm_cli.py`.
 Abbreviated as `cli` below.
 
 ### Session Management
 
 ```bash
 # Create session (indexes project, caches session ID)
-python3 cli init [--cwd /path/to/project] [--port 3000]
+python3 cli init [--cwd /path/to/project] [--port 3001]
 
 # Server + session status
 python3 cli status

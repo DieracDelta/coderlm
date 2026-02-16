@@ -2,7 +2,7 @@
 """CLI wrapper for the coderlm-server API.
 
 Manages session state and provides clean commands for codebase exploration.
-All state is cached in .claude/coderlm_state/session.json relative to cwd.
+All state is cached in .coderlm/codex_state/session.json relative to cwd.
 
 Usage:
   python3 coderlm_cli.py init [--port PORT] [--cwd PATH]
@@ -45,12 +45,17 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shlex
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 def _resolve_instance() -> str | None:
@@ -65,7 +70,7 @@ def _resolve_instance() -> str | None:
     if inst:
         return inst
 
-    base = Path(".claude/coderlm_state/instances")
+    base = Path(".coderlm/codex_state/instances")
     if base.exists():
         pid = os.getpid()
         while pid > 1:
@@ -81,7 +86,7 @@ def _resolve_instance() -> str | None:
             except (OSError, ValueError, IndexError):
                 break
 
-    hint = Path(".claude/coderlm_state/active_instance")
+    hint = Path(".coderlm/codex_state/active_instance")
     if hint.exists():
         try:
             return hint.read_text().strip()
@@ -93,7 +98,7 @@ def _resolve_instance() -> str | None:
 
 def _state_dir() -> Path:
     """Return per-instance state directory."""
-    base = Path(".claude/coderlm_state")
+    base = Path(".coderlm/codex_state")
     inst = _resolve_instance()
     if inst:
         return base / "sessions" / inst
@@ -123,7 +128,7 @@ def _clear_state() -> None:
 
 def _base_url(state: dict) -> str:
     host = state.get("host", "127.0.0.1")
-    port = state.get("port", int(os.environ.get("CODERLM_PORT", 3002)))
+    port = state.get("port", int(os.environ.get("CODERLM_PORT", 3001)))
     return f"http://{host}:{port}/api/v1"
 
 
@@ -202,7 +207,7 @@ def _delete_req(state: dict, path: str) -> dict:
 
 
 def _is_subcall() -> bool:
-    """True when running inside a subcall (haiku subagent) or REPL context."""
+    """True when running inside a subcall agent or REPL context."""
     return os.environ.get("CODERLM_SUBCALL") == "1"
 
 
@@ -237,25 +242,139 @@ def _output(result: dict) -> None:
 
 # ── Commands ──────────────────────────────────────────────────────────
 
+def _codex_model() -> str:
+    return os.environ.get("CODERLM_SUBCALL_MODEL", "o4-mini")
+
+
+def _codex_extra_args() -> list[str]:
+    raw = os.environ.get("CODERLM_SUBCALL_EXTRA_ARGS", "").strip()
+    if not raw:
+        return []
+    return shlex.split(raw)
+
+
+def _detect_limit_reason(text: str) -> str | None:
+    lowered = text.lower()
+    patterns = [
+        "you've hit your limit",
+        "rate limit",
+        "insufficient quota",
+        "quota",
+        "too many requests",
+        "resets",
+    ]
+    for pattern in patterns:
+        if pattern in lowered:
+            return pattern
+    return None
+
+
+def _run_codex_subcall(
+    system_prompt: str,
+    user_prompt: str,
+    cwd: str,
+    timeout: int,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    full_prompt = f"{system_prompt}\n\n---\nUSER TASK\n{user_prompt}\n"
+    cmd = [
+        "nix",
+        "run",
+        "github:sadjow/codex-nix",
+        "--",
+        "exec",
+        "-m",
+        _codex_model(),
+        "--skip-git-repo-check",
+        "--cd",
+        cwd,
+        *(_codex_extra_args()),
+        full_prompt,
+    ]
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+    )
+
+
+def _get_var_optional(state: dict, name: str) -> dict | None:
+    base = _base_url(state)
+    quoted = urllib.parse.quote(name, safe="")
+    url = f"{base}/vars/{quoted}"
+    req = urllib.request.Request(
+        url,
+        headers={"X-Session-Id": _session_id(state)},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw.strip() else None
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Failed to read var '{name}': HTTP {exc.code} {body[:300]}")
+
+
+def _build_deep_query_cache_key(
+    project: str,
+    query: str,
+    max_depth: int,
+    model: str,
+    prompt_version: str,
+) -> str:
+    payload = {
+        "project": project,
+        "query": query,
+        "max_depth": max_depth,
+        "model": model,
+        "prompt_version": prompt_version,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:24]
+    return f"deep_query_cache:{digest}"
+
+def _ensure_project_cli_link(project_cwd: str) -> None:
+    """Ensure the project-local CLI entrypoint exists for deep-query workflows."""
+    state_dir = Path(project_cwd) / ".coderlm/codex_state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    link_path = state_dir / "coderlm_cli.py"
+    source_path = Path(__file__).resolve()
+
+    try:
+        if link_path.is_symlink() and link_path.resolve() == source_path:
+            return
+        if link_path.exists() or link_path.is_symlink():
+            link_path.unlink()
+        link_path.symlink_to(source_path)
+    except OSError:
+        # Symlink creation may be unavailable in some environments.
+        link_path.write_text(source_path.read_text())
+
 
 def cmd_init(args: argparse.Namespace) -> None:
     import uuid as _uuid
 
     cwd = os.path.abspath(args.cwd or os.getcwd())
     host = args.host or "127.0.0.1"
-    port = args.port or int(os.environ.get("CODERLM_PORT", 3002))
+    port = args.port or int(os.environ.get("CODERLM_PORT", 3001))
     base = f"http://{host}:{port}/api/v1"
 
     # Instance isolation: reuse existing instance from env/PID or generate new.
     instance = _resolve_instance() or str(_uuid.uuid4())[:8]
     os.environ["CODERLM_INSTANCE"] = instance
+    _ensure_project_cli_link(cwd)
 
     # Write PID-keyed instance files so CLI calls from this Claude session
     # auto-resolve via process tree walk (/proc/PID/stat → PPID chain).
     # We write at each ancestor PID (up to 5 levels, skipping PID 1).
     # The read walk hits the closest ancestor first, so even if two sessions
     # share a parent shell, they each find their own Claude PID's file.
-    instances_dir = Path(".claude/coderlm_state/instances")
+    instances_dir = Path(".coderlm/codex_state/instances")
     instances_dir.mkdir(parents=True, exist_ok=True)
     pid = os.getpid()
     for _ in range(5):
@@ -269,7 +388,7 @@ def cmd_init(args: argparse.Namespace) -> None:
             break
 
     # Also write active_instance as single-session fallback
-    active_file = Path(".claude/coderlm_state/active_instance")
+    active_file = Path(".coderlm/codex_state/active_instance")
     active_file.write_text(instance)
 
     # Check server health first
@@ -284,6 +403,15 @@ def cmd_init(args: argparse.Namespace) -> None:
         sid = existing["session_id"]
         try:
             _request("GET", f"{base}/sessions/{sid}")
+            state = {
+                "session_id": sid,
+                "host": host,
+                "port": port,
+                "project": cwd,
+                "instance": instance,
+                "created_at": existing.get("created_at", ""),
+            }
+            _save_state(state)
             print(f"Session reused: {sid}")
             print(f"Instance: {instance}")
             print(f"Project: {cwd}")
@@ -313,7 +441,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     if not state:
         # No session — just check server health
         host = args.host or "127.0.0.1"
-        port = args.port or int(os.environ.get("CODERLM_PORT", 3002))
+        port = args.port or int(os.environ.get("CODERLM_PORT", 3001))
         base = f"http://{host}:{port}/api/v1"
         result = _request("GET", f"{base}/health")
         _output(result)
@@ -762,11 +890,16 @@ def cmd_subcall_batch(args: argparse.Namespace) -> None:
 
 def _load_agent_system_prompt(agent_name: str) -> str:
     """Load an agent's instructions for use as a system prompt."""
-    agent_file = Path(__file__).resolve().parent.parent.parent.parent / "agents" / f"{agent_name}.md"
-    if not agent_file.exists():
-        agent_file = Path(f".claude/agents/{agent_name}.md")
-    if not agent_file.exists():
-        raise RuntimeError(f"{agent_name} agent not found at: {agent_file}")
+    skill_dir = Path(__file__).resolve().parent.parent
+    candidates = [
+        skill_dir / "references" / f"{agent_name}.md",
+        Path(__file__).resolve().parent.parent.parent.parent / "agents" / f"{agent_name}.md",
+        Path(f".claude/agents/{agent_name}.md"),
+    ]
+    agent_file = next((p for p in candidates if p.exists()), None)
+    if agent_file is None:
+        searched = "\n".join(str(p) for p in candidates)
+        raise RuntimeError(f"{agent_name} agent not found. Searched:\n{searched}")
     text = agent_file.read_text()
     # Strip YAML frontmatter
     if text.startswith("---"):
@@ -777,9 +910,7 @@ def _load_agent_system_prompt(agent_name: str) -> str:
 
 
 def cmd_deep_query(args: argparse.Namespace) -> None:
-    """Run full RLM exploration loop in a haiku sub-LM."""
-    import shutil
-    import subprocess
+    """Run full RLM exploration loop in a codex-nix sub-LM."""
 
     state = _load_state()
     if not state.get("session_id"):
@@ -788,73 +919,118 @@ def cmd_deep_query(args: argparse.Namespace) -> None:
 
     # Depth tracking (same mechanism as llm_query)
     depth = int(os.environ.get("CODERLM_DEPTH", "0"))
-    max_depth = int(os.environ.get("CODERLM_MAX_DEPTH", str(args.max_depth or 3)))
+    max_depth = int(os.environ.get("CODERLM_MAX_DEPTH", str(args.max_depth or 2)))
     if depth >= max_depth:
         _output({"error": f"max recursion depth reached (depth={depth})", "depth": depth})
         return
 
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        _output({"error": "'claude' CLI not found on PATH"})
-        return
-
-    # Clear Final from previous runs
-    try:
-        _delete_req(state, "/vars/Final")
-    except SystemExit:
-        pass
-
-    # Load deep-query agent prompt
+    model = _codex_model()
+    prompt_version = "deep-query-codex-v2"
     system_prompt = _load_agent_system_prompt("coderlm-deep-query")
+    project_cwd = state.get("project") or os.getcwd()
+    cli_path = os.path.join(project_cwd, ".coderlm/codex_state/coderlm_cli.py")
+    run_id = uuid.uuid4().hex[:12]
+    final_key = f"Final:{run_id}"
+    cache_key = _build_deep_query_cache_key(project_cwd, args.query, max_depth, model, prompt_version)
 
-    # Build user prompt with ABSOLUTE paths so haiku doesn't try to find them
-    project_cwd = state.get("cwd", os.getcwd())
-    cli_path = os.path.join(project_cwd, ".claude/coderlm_state/coderlm_cli.py")
-    user_prompt = f"Query: {args.query}\nCLI: {cli_path}\nCWD: {project_cwd}"
+    if not args.no_cache:
+        cached = _get_var_optional(state, cache_key)
+        if cached and cached.get("value"):
+            value = cached["value"]
+            now = int(time.time())
+            created_at = int(value.get("created_at", 0))
+            ttl = int(value.get("ttl_seconds", args.cache_ttl_seconds))
+            if created_at > 0 and now - created_at <= ttl and "result" in value:
+                _output({
+                    "status": "ok",
+                    "cached": True,
+                    "cache_key": cache_key,
+                    "run_id": run_id,
+                    "result": value["result"],
+                    "depth": depth,
+                })
+                return
 
-    # Spawn haiku with full REPL access
+    user_prompt = (
+        f"Query: {args.query}\n"
+        f"CLI: {cli_path}\n"
+        f"CWD: {project_cwd}\n"
+        f"Run-ID: {run_id}\n"
+        f"Final-Key: {final_key}\n"
+        "Set your final answer with set_final(<result>, key='<Final-Key>')."
+    )
     env = {
         **os.environ,
         "CODERLM_SUBCALL": "1",
         "CODERLM_DEPTH": str(depth + 1),
+        "CODERLM_FINAL_KEY": final_key,
     }
     if args.max_depth is not None:
         env["CODERLM_MAX_DEPTH"] = str(args.max_depth)
 
-    print(f"Deep-query (depth {depth + 1}): {args.query}", file=sys.stderr)
-    result = subprocess.run(
-        [
-            claude_bin,
-            "-p",
-            "--model", "haiku",
-            "--output-format", "text",
-            "--no-session-persistence",
-            "--disable-slash-commands",
-            "--setting-sources", "",
-            "--tools", "Bash,Read",
-            "--system-prompt", system_prompt,
-            user_prompt,
-        ],
-        capture_output=True,
-        text=True,
+    print(f"Deep-query (depth {depth + 1}, model {model}): {args.query}", file=sys.stderr)
+    result = _run_codex_subcall(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        cwd=project_cwd,
         timeout=600,
         env=env,
     )
+    combined_output = f"{result.stdout}\n{result.stderr}"
+    limit_reason = _detect_limit_reason(combined_output)
 
-    # Read Final variable from server (haiku should have set it)
-    try:
-        final_resp = _get(state, "/vars/Final")
-        if final_resp and final_resp.get("value"):
-            _output({"result": final_resp["value"], "depth": depth})
-            return
-    except SystemExit:
-        pass
+    if result.returncode != 0:
+        payload = {
+            "status": "subcall_failed",
+            "run_id": run_id,
+            "final_key": final_key,
+            "depth": depth,
+            "exit_code": result.returncode,
+            "stdout_preview": result.stdout[:1200] if result.stdout else "",
+            "stderr_preview": result.stderr[:1200] if result.stderr else "",
+        }
+        if limit_reason:
+            payload["limit_reason"] = limit_reason
+        _output(payload)
+        sys.exit(2)
 
-    # Fallback: return haiku's raw output (truncated)
+    final_resp = _get_var_optional(state, final_key)
+    if not final_resp or "value" not in final_resp:
+        payload = {
+            "status": "final_missing",
+            "run_id": run_id,
+            "final_key": final_key,
+            "depth": depth,
+            "stdout_preview": result.stdout[:2000] if result.stdout else "",
+            "stderr_preview": result.stderr[:1000] if result.stderr else "",
+        }
+        if limit_reason:
+            payload["limit_reason"] = limit_reason
+        _output(payload)
+        sys.exit(3)
+
+    final_value = final_resp["value"]
+    if not args.no_cache:
+        cache_payload = {
+            "created_at": int(time.time()),
+            "ttl_seconds": int(args.cache_ttl_seconds),
+            "result": final_value,
+            "model": model,
+            "prompt_version": prompt_version,
+        }
+        try:
+            _post(state, "/vars", {"name": cache_key, "value": cache_payload})
+        except SystemExit:
+            pass
+
     _output({
-        "result": result.stdout[:2000] if result.stdout else None,
+        "status": "ok",
+        "cached": False,
+        "cache_key": cache_key,
+        "run_id": run_id,
+        "final_key": final_key,
         "depth": depth,
-        "warning": "no structured Final set by sub-LM",
+        "result": final_value,
     })
 
 
@@ -918,7 +1094,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--cwd", "--project", "--dir", "--path",
                          dest="cwd", help="Project directory (default: $PWD)")
     p_init.add_argument("--host", default=None, help="Server host (default: 127.0.0.1)")
-    p_init.add_argument("--port", type=int, default=None, help="Server port (default: $CODERLM_PORT or 3002)")
+    p_init.add_argument("--port", type=int, default=None, help="Server port (default: $CODERLM_PORT or 3001)")
     p_init.set_defaults(func=cmd_init)
 
     # status
@@ -1140,9 +1316,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_sb.set_defaults(func=cmd_subcall_batch)
 
     # deep-query
-    p_dq = sub.add_parser("deep-query", help="Run full RLM exploration loop in haiku sub-LM")
+    p_dq = sub.add_parser("deep-query", help="Run full RLM exploration loop in codex-nix sub-LM")
     p_dq.add_argument("query", help="Exploration question")
     p_dq.add_argument("--max-depth", type=int, default=None, help="Override CODERLM_MAX_DEPTH")
+    p_dq.add_argument("--no-cache", action="store_true", help="Disable deep-query cache for this invocation")
+    p_dq.add_argument(
+        "--cache-ttl-seconds",
+        type=int,
+        default=600,
+        help="TTL for deep-query cache entries in seconds (default: 600)",
+    )
     p_dq.set_defaults(func=cmd_deep_query)
 
     # compact-history

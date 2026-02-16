@@ -10,8 +10,8 @@ fi
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CLI="$PLUGIN_ROOT/skills/coderlm/scripts/coderlm_cli.py"
-BASE_STATE_DIR=".claude/coderlm_state"
-CODERLM_PORT="${CODERLM_PORT:-3002}"
+BASE_STATE_DIR=".coderlm/codex_state"
+CODERLM_PORT="${CODERLM_PORT:-3001}"
 
 # Always create the symlink so the skill can find the CLI,
 # even if the server isn't running yet.

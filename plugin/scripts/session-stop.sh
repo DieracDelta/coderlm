@@ -11,10 +11,10 @@ fi
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 CLI="$PLUGIN_ROOT/skills/coderlm/scripts/coderlm_cli.py"
-CODERLM_PORT="${CODERLM_PORT:-3002}"
+CODERLM_PORT="${CODERLM_PORT:-3001}"
 
 # Clean up PID-keyed instance file for this Claude session
-INSTANCES_DIR=".claude/coderlm_state/instances"
+INSTANCES_DIR=".coderlm/codex_state/instances"
 if [ -d "$INSTANCES_DIR" ] && [ -f "$INSTANCES_DIR/$PPID" ]; then
     CODERLM_INSTANCE=$(cat "$INSTANCES_DIR/$PPID")
     export CODERLM_INSTANCE

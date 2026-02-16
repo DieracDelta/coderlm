@@ -80,7 +80,7 @@ cargo run --release -- serve /path/to/your/project
 ### Verify the Server
 
 ```bash
-curl http://127.0.0.1:3000/api/v1/health
+curl http://127.0.0.1:3001/api/v1/health
 # → {"status":"ok","projects":0,"active_sessions":0,"max_projects":5}
 ```
 
@@ -124,7 +124,7 @@ When installed, CodeRLM gives Claude Code:
 coderlm-server serve [PATH] [OPTIONS]
 
 Options:
-  -p, --port <PORT>              Port to listen on [default: 3000]
+  -p, --port <PORT>              Port to listen on [default: 3001]
   -b, --bind <ADDR>              Bind address [default: 127.0.0.1]
       --max-file-size <BYTES>    Max file size to index [default: 1048576]
       --max-projects <N>         Max concurrent indexed projects [default: 5]

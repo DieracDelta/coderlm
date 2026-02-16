@@ -37,7 +37,7 @@ cd server && cargo run -- serve --port 8080           # custom port
 cd server && cargo check
 
 # Verify server is running
-curl http://127.0.0.1:3000/api/v1/health
+curl http://127.0.0.1:3001/api/v1/health
 ```
 
 There are no tests yet. When adding tests, use `cargo test` from `server/`.
@@ -95,7 +95,7 @@ python3 plugin/skills/coderlm/scripts/coderlm_cli.py <command> [args]
 
 The `.claude/skills/coderlm/scripts/coderlm_cli.py` path also works when running locally (via the workaround copy).
 
-Session state cached in `.claude/coderlm_state/session.json`. The CLI must be run from the project root that was indexed. Key commands: `init`, `structure`, `symbols`, `search`, `impl`, `callers`, `tests`, `grep` (with `--scope code`), `peek`, `save-annotations`, `load-annotations`, `cleanup`. Full reference in `plugin/skills/coderlm/references/api-reference.md`.
+Session state cached in `.coderlm/codex_state/session.json`. The CLI must be run from the project root that was indexed. Key commands: `init`, `structure`, `symbols`, `search`, `impl`, `callers`, `tests`, `grep` (with `--scope code`), `peek`, `save-annotations`, `load-annotations`, `cleanup`. Full reference in `plugin/skills/coderlm/references/api-reference.md`.
 
 ## Workflow: Codebase Exploration
 

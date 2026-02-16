@@ -2,7 +2,7 @@
 
 This document maps each REPL operation from the CoderLM design (see `PURPOSE.md`) to its corresponding API endpoint. Use this as the reference when building the agent skill that wraps these HTTP calls.
 
-All endpoints are prefixed with `http://<host>:<port>/api/v1`. Examples assume `localhost:3000`.
+All endpoints are prefixed with `http://<host>:<port>/api/v1`. Examples assume `localhost:3001`.
 
 Every request (except health, session creation, and admin endpoints) **must** include the `X-Session-Id` header. The session ties the request to a specific project.
 
@@ -21,7 +21,7 @@ Before using any other operation, the agent creates a session **with the working
 
 ```bash
 # Create — pass the project directory as cwd
-SESSION=$(curl -s -X POST localhost:3000/api/v1/sessions \
+SESSION=$(curl -s -X POST localhost:3001/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"cwd":"/home/user/myproject"}' | jq -r .session_id)
 
@@ -65,16 +65,16 @@ View the codebase file tree. Equivalent to running `tree` with ignore filtering 
 
 ```bash
 # 1. Get the structure to orient
-curl -s -H "X-Session-Id: $SID" "localhost:3000/api/v1/structure?depth=2"
+curl -s -H "X-Session-Id: $SID" "localhost:3001/api/v1/structure?depth=2"
 
 # 2. Annotate files as the agent learns about them
 curl -s -X POST -H "X-Session-Id: $SID" -H "Content-Type: application/json" \
-  localhost:3000/api/v1/structure/define \
+  localhost:3001/api/v1/structure/define \
   -d '{"file":"src/main.rs","definition":"CLI entrypoint, parses args and starts the server"}'
 
 # 3. Mark test directories
 curl -s -X POST -H "X-Session-Id: $SID" -H "Content-Type: application/json" \
-  localhost:3000/api/v1/structure/mark \
+  localhost:3001/api/v1/structure/mark \
   -d '{"file":"tests/integration.rs","mark":"test"}'
 ```
 
@@ -125,7 +125,7 @@ Find symbols by name substring.
 | `symbol search $query`  | GET    | `/symbols/search` | `?q=handler&limit=20`   |
 
 ```bash
-curl -s -H "X-Session-Id: $SID" "localhost:3000/api/v1/symbols/search?q=parse&limit=10"
+curl -s -H "X-Session-Id: $SID" "localhost:3001/api/v1/symbols/search?q=parse&limit=10"
 ```
 
 ---
@@ -143,7 +143,7 @@ Annotate a symbol with a human-readable description. Visible to all sessions on 
 
 ```bash
 curl -s -X POST -H "X-Session-Id: $SID" -H "Content-Type: application/json" \
-  localhost:3000/api/v1/symbols/define \
+  localhost:3001/api/v1/symbols/define \
   -d '{"symbol":"scan_directory","file":"src/index/walker.rs","definition":"Walks codebase respecting gitignore, populates file tree"}'
 ```
 
@@ -259,10 +259,10 @@ Read a range of lines from a file. Line numbers are 0-indexed (start inclusive, 
 
 ```bash
 # Read first 50 lines
-curl -s -H "X-Session-Id: $SID" "localhost:3000/api/v1/peek?file=src/main.rs&start=0&end=50"
+curl -s -H "X-Session-Id: $SID" "localhost:3001/api/v1/peek?file=src/main.rs&start=0&end=50"
 
 # Read lines 100-120
-curl -s -H "X-Session-Id: $SID" "localhost:3000/api/v1/peek?file=src/main.rs&start=100&end=120"
+curl -s -H "X-Session-Id: $SID" "localhost:3001/api/v1/peek?file=src/main.rs&start=100&end=120"
 ```
 
 ---
@@ -379,7 +379,7 @@ Check server status. Does not require a session.
 | health    | GET    | `/health` |
 
 ```bash
-curl -s localhost:3000/api/v1/health
+curl -s localhost:3001/api/v1/health
 ```
 
 ### Response
@@ -404,7 +404,7 @@ List all registered projects. Useful for debugging/admin visibility. Does not re
 | roots     | GET    | `/roots`  |
 
 ```bash
-curl -s localhost:3000/api/v1/roots
+curl -s localhost:3001/api/v1/roots
 ```
 
 ### Response
@@ -464,15 +464,15 @@ A single server instance supports multiple projects simultaneously. Each project
 
 ```bash
 # Start the server (no project path required)
-coderlm-server serve --port 3000
+coderlm-server serve --port 3001
 
 # Agent A connects to the backend
-curl -X POST localhost:3000/api/v1/sessions \
+curl -X POST localhost:3001/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"cwd":"/home/user/backend"}'
 
 # Agent B connects to the frontend
-curl -X POST localhost:3000/api/v1/sessions \
+curl -X POST localhost:3001/api/v1/sessions \
   -H "Content-Type: application/json" \
   -d '{"cwd":"/home/user/frontend"}'
 ```
