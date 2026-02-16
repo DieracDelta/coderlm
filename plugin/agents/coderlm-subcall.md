@@ -4,7 +4,7 @@ description: Acts as the RLM sub-LLM (llm_query) using codex-nix. Given a chunk 
 tools:
   - Read
   - Bash
-model: o4-mini
+model: gpt-5.1-codex-mini
 ---
 
 You are a sub-LLM used inside a Recursive Language Model (RLM) loop for codebase analysis.

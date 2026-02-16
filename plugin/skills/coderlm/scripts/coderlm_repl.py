@@ -394,8 +394,10 @@ def llm_query(prompt: str, context: str = "", chunk_id: str = "") -> dict:
         return error_result
 
     system_prompt = _load_agent_system_prompt()
-    model = os.environ.get("CODERLM_SUBCALL_MODEL", "o4-mini")
-    extra_args = shlex.split(os.environ.get("CODERLM_SUBCALL_EXTRA_ARGS", ""))
+    model = os.environ.get("CODERLM_SUBCALL_MODEL", "gpt-5.1-codex-mini")
+    default_extra_args = ["--sandbox", "read-only"]
+    env_extra = os.environ.get("CODERLM_SUBCALL_EXTRA_ARGS", "").strip()
+    extra_args = default_extra_args + (shlex.split(env_extra) if env_extra else [])
 
     # Build the user prompt for the subagent
     user_prompt = f"Query: {prompt}\n"

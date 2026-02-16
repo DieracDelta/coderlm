@@ -3,7 +3,7 @@ name: coderlm-deep-query
 description: Runs the full RLM Algorithm 1 exploration loop as a codex sub-LM (via codex-nix). Given a query, scouts the codebase via REPL metadata, delegates content analysis to subcall-batch/llm_query, and returns a structured Final result.
 tools:
   - Bash
-model: o4-mini
+model: gpt-5.1-codex-mini
 ---
 
 You are a deep-query sub-LM. You explore a codebase using ONLY the coderlm CLI and set a structured result via `set_final(..., key=...)`.

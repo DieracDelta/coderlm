@@ -243,14 +243,16 @@ def _output(result: dict) -> None:
 # ── Commands ──────────────────────────────────────────────────────────
 
 def _codex_model() -> str:
-    return os.environ.get("CODERLM_SUBCALL_MODEL", "o4-mini")
+    return os.environ.get("CODERLM_SUBCALL_MODEL", "gpt-5.1-codex-mini")
 
 
 def _codex_extra_args() -> list[str]:
+    # Deep-query subcalls are read-mostly and should not mutate files by default.
+    default_args = ["--sandbox", "read-only"]
     raw = os.environ.get("CODERLM_SUBCALL_EXTRA_ARGS", "").strip()
     if not raw:
-        return []
-    return shlex.split(raw)
+        return default_args
+    return default_args + shlex.split(raw)
 
 
 def _detect_limit_reason(text: str) -> str | None:
